@@ -20,6 +20,8 @@ async function request(method, path, { body, isFormData } = {}) {
   return data;
 }
 
+// ---- Core ----
+
 export async function ping() {
   return request('GET', '/ping');
 }
@@ -28,12 +30,13 @@ export async function getSongs() {
   return request('GET', '/songs');
 }
 
-export async function uploadSong(file, metadata = {}) {
+export async function uploadSong(file, metadata = {}, coverFile = null) {
   const form = new FormData();
   form.append('file', file);
   if (metadata.title) form.append('title', metadata.title);
   if (metadata.artist) form.append('artist', metadata.artist);
   if (metadata.album) form.append('album', metadata.album);
+  if (coverFile) form.append('cover', coverFile);
   return request('POST', '/upload', { body: form, isFormData: true });
 }
 
@@ -44,6 +47,70 @@ export async function deleteSong(songId) {
 export async function getDownloadUrl(songId) {
   return `${BASE}/download/${songId}`;
 }
+
+// ---- Cover images ----
+
+export function getCoverUrl(songId) {
+  return `${BASE}/covers/${songId}`;
+}
+
+export async function uploadCover(songId, coverFile) {
+  const form = new FormData();
+  form.append('cover', coverFile);
+  return request('POST', `/songs/${songId}/cover`, { body: form, isFormData: true });
+}
+
+// ---- Artists ----
+
+export async function getArtists() {
+  return request('GET', '/artists');
+}
+
+export function getArtistImageUrl(name) {
+  return `${BASE}/artist-image/${encodeURIComponent(name)}`;
+}
+
+export async function uploadArtistImage(name, imageFile) {
+  const form = new FormData();
+  form.append('image', imageFile);
+  return request('POST', `/artists/${encodeURIComponent(name)}/image`, { body: form, isFormData: true });
+}
+
+// ---- Playlists ----
+
+export async function getPlaylists() {
+  return request('GET', '/playlists');
+}
+
+export async function createPlaylist(name) {
+  return request('POST', '/playlists', { body: { name } });
+}
+
+export async function getPlaylist(playlistId) {
+  return request('GET', `/playlists/${playlistId}`);
+}
+
+export async function updatePlaylist(playlistId, name) {
+  return request('PUT', `/playlists/${playlistId}`, { body: { name } });
+}
+
+export async function deletePlaylist(playlistId) {
+  return request('DELETE', `/playlists/${playlistId}`);
+}
+
+export async function addSongToPlaylist(playlistId, songId) {
+  return request('POST', `/playlists/${playlistId}/songs`, { body: { song_id: songId } });
+}
+
+export async function removeSongFromPlaylist(playlistId, songId) {
+  return request('DELETE', `/playlists/${playlistId}/songs/${songId}`);
+}
+
+export async function reorderPlaylistSongs(playlistId, songIds) {
+  return request('PUT', `/playlists/${playlistId}/songs`, { body: { song_ids: songIds } });
+}
+
+// ---- Play logs ----
 
 export async function postPlaylog(songId, duration) {
   return request('POST', '/playlog', {
@@ -59,9 +126,17 @@ export async function syncLogs(logs) {
   return request('POST', '/sync', { body: { logs } });
 }
 
+// ---- Analytics ----
+
 export async function getAnalytics() {
   return request('GET', '/analytics');
 }
+
+export async function getWrappedAnalytics(year) {
+  return request('GET', `/analytics/wrapped?year=${year}`);
+}
+
+// ---- Lyrics ----
 
 export async function getLyrics(songId) {
   return request('GET', `/lyrics/${songId}`);

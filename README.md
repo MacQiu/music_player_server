@@ -1,8 +1,12 @@
 # Music Player Server
 
-A local-first Flask backend for a personal iOS music app. Stores a music
-library on your machine, serves audio over WiFi, tracks playback analytics,
-and supports offline-first sync from the client.
+A local-first Flask backend + React web UI for a personal music player.
+Desktop UI is Spotify-inspired (sidebar, bottom player bar, queue, lyrics).
+Mobile UI is SoundCloud-inspired (overlay player, swipe controls, simplified sync).
+
+Stores a music library on your machine, serves audio over WiFi, tracks
+playback analytics with charts, supports playlists, cover art, and
+offline-first sync from mobile clients.
 
 No external services. SQLite only.
 
@@ -19,7 +23,19 @@ data/
   music.db          # created on first run
 storage/
   songs/            # uploaded audio files
+  covers/           # song cover images
+  artists/          # artist profile images
   lyrics/           # optional <song_id>.lrc files
+test-ui/            # Vite + React SPA
+  src/
+    api/client.js   # API client wrapper
+    components/     # DesktopLayout, Sidebar, DesktopPlayer, Player,
+                    # UploadModal, ServerModal, QueueSidebar, LyricsOverlay,
+                    # MobilePlayerOverlay, MobileQueueOverlay, PlaylistOverlay
+    pages/          # Home, Library, Analytics, Sync (mobile)
+                    # DesktopHome, DesktopLibrary, DesktopAnalytics (desktop)
+    App.jsx         # Root: mode toggle, shared audio, queue state, resume
+    index.css       # All styles
 ```
 
 ---
@@ -35,176 +51,191 @@ source venv/bin/activate
 
 pip install -r requirements.txt
 python app.py
+
+# React UI
+cd test-ui
+npm install
+npm run dev
 ```
 
 Server listens on `http://0.0.0.0:5000`. From another device on the same WiFi,
 use your machine's LAN IP (e.g. `http://192.168.1.42:5000`).
 
+The React dev server runs on `http://localhost:3000` and proxies `/api/*` to
+Flask.
+
 ---
 
 ## Data Model
 
-- `songs(id, title, artist, album, duration, file_path, date_added)`
+- `songs(id, title, artist, album, duration, file_path, cover_path, date_added)`
 - `analytics(song_id PK, play_count, total_time, last_played)`
 - `playlogs(id PK, song_id, duration, timestamp, received_at)`
+- `playlists(id PK, name, created_at)`
+- `playlist_songs(playlist_id, song_id, position)` -- composite PK, FK cascade
+- `artists(name PK, image_path, created_at)`
 
 Idempotency: `playlogs.id` is a UUID the client generates when a play
-happens. If the same ID arrives twice (e.g. retry after lost connection)
-the second insert is ignored and analytics are **not** re-incremented.
+happens. If the same ID arrives twice the second insert is ignored and
+analytics are not re-incremented.
 
 ---
 
 ## API
 
-All responses are JSON unless noted. Errors look like `{"error": "..."}`.
+All responses are JSON. Errors look like `{"error": "..."}`.
 
-### `GET /ping`
+### Core
 
-Connection check.
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/ping` | Health check + UTC time |
+| `GET` | `/songs` | List all songs (newest first, includes `cover_url`) |
+| `POST` | `/upload` | Multipart upload: `file` (required), `cover` (optional image), `title`, `artist`, `album`, `duration` |
+| `GET` | `/download/<song_id>` | Stream audio file |
+| `DELETE` | `/songs/<song_id>` | Delete song, analytics, cover, and audio file |
 
-```bash
-curl http://localhost:5000/ping
-```
+### Cover Images
 
-### `GET /songs`
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/covers/<song_id>` | Serve cover image |
+| `POST` | `/songs/<song_id>/cover` | Upload/replace cover image (`cover` file field) |
 
-List all songs ordered by newest first.
+### Artists
 
-```bash
-curl http://localhost:5000/songs
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/artists` | List all artists with image URLs and song counts |
+| `POST` | `/artists/<name>/image` | Upload artist profile image (`image` file field) |
+| `GET` | `/artist-image/<name>` | Serve artist image |
 
-### `POST /upload`
+### Playlists
 
-Multipart upload. `file` is required; `title`, `artist`, `album`, `duration`
-are optional overrides. Missing fields are filled from ID3/WAV tags via
-`mutagen` when available.
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/playlists` | List all playlists with song counts and cover URLs |
+| `POST` | `/playlists` | Create playlist `{"name": "..."}` |
+| `GET` | `/playlists/<id>` | Get playlist with ordered songs |
+| `PUT` | `/playlists/<id>` | Rename playlist `{"name": "..."}` |
+| `DELETE` | `/playlists/<id>` | Delete playlist |
+| `POST` | `/playlists/<id>/songs` | Add song `{"song_id": "..."}` |
+| `DELETE` | `/playlists/<id>/songs/<song_id>` | Remove song |
+| `PUT` | `/playlists/<id>/songs` | Reorder songs `{"song_ids": [...]}` |
 
-```bash
-curl -X POST http://localhost:5000/upload \
-  -F "file=@/path/to/song.mp3" \
-  -F "title=Clair de Lune" \
-  -F "artist=Debussy"
-```
+### Play Logs & Sync
 
-Response:
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/playlog` | Log a single play (idempotent by `id`) |
+| `POST` | `/sync` | Batch play logs `{"logs": [...]}` |
 
-```json
-{ "id": "ab12…", "title": "Clair de Lune", "artist": "Debussy",
-  "album": null, "duration": 312.4, "file_path": "storage/songs/ab12…_song.mp3" }
-```
+### Analytics
 
-### `GET /download/<song_id>`
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/analytics` | Top songs, top artists, totals, recommendations, 30-day play history |
+| `GET` | `/analytics/wrapped?year=YYYY` | Yearly stats (Dec 1 of year-1 to Nov 30 of year): top songs, top artists, total plays and time |
 
-Streams the audio file. Use this URL directly from the iOS client.
+### Lyrics
 
-```bash
-curl -O -J http://localhost:5000/download/ab12...
-```
-
-### `POST /playlog`
-
-Log a single play. Send a client-generated UUID as `id` to keep retries
-idempotent. `timestamp` should be ISO 8601 UTC; server fills in "now" if
-omitted.
-
-```bash
-curl -X POST http://localhost:5000/playlog \
-  -H "Content-Type: application/json" \
-  -d '{"id":"c1-uuid-1","song_id":"ab12...","duration":183.5,"timestamp":"2026-04-17T12:34:56Z"}'
-```
-
-Response:
-
-```json
-{ "ok": true, "id": "c1-uuid-1", "inserted": true }
-```
-
-Sending the same `id` again returns `"inserted": false` and does not
-increment analytics.
-
-### `POST /sync`
-
-Batch version of `/playlog` for offline-first clients. Send everything
-buffered since last sync; safe to resend.
-
-```bash
-curl -X POST http://localhost:5000/sync \
-  -H "Content-Type: application/json" \
-  -d '{
-    "logs": [
-      {"id":"c1-uuid-1","song_id":"ab12...","duration":183.5,"timestamp":"2026-04-17T12:34:56Z"},
-      {"id":"c1-uuid-2","song_id":"ab12...","duration":201.0,"timestamp":"2026-04-17T12:40:12Z"}
-    ]
-  }'
-```
-
-Response:
-
-```json
-{ "inserted": 2, "skipped": 0, "errors": [] }
-```
-
-### `GET /analytics`
-
-Aggregate stats: top 10 songs, top 10 artists, total listening time, and a
-small "recommendations" list based on play counts.
-
-```bash
-curl http://localhost:5000/analytics
-```
-
-### `DELETE /songs/<song_id>`
-
-Remove the DB rows and the audio file from disk.
-
-```bash
-curl -X DELETE http://localhost:5000/songs/ab12...
-```
-
-### `GET /lyrics/<song_id>`
-
-Return the `.lrc` lyric file if you've dropped one at
-`storage/lyrics/<song_id>.lrc`.
-
-```bash
-curl http://localhost:5000/lyrics/ab12...
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/lyrics/<song_id>` | Return `.lrc` file if available |
 
 ---
 
-## Python client example
+## Desktop UI (Spotify-inspired)
 
-```python
-import requests, uuid, datetime
+- **Sidebar**: Home, Library, Analytics navigation; playlist list (click to
+  open playlist overlay); inline create; cloud-upload icon for song upload
+  modal; gear icon for server controls modal
+- **Main content**: Home (recently played, artists with image upload, playlists
+  that open as overlays, recommended cards), Library (searchable song table,
+  right-click context menu for play/queue/set cover/add to playlist), Analytics
+  (stat cards + recharts charts + yearly wrapped section with year selector)
+- **Bottom player bar**: cover thumbnail + song info (left), shuffle/prev/
+  play/pause/next/repeat controls + seek bar (center), lyrics/queue/volume/
+  connection icons (right). Repeat icon uses SVG with a visible "1" for
+  single-song repeat.
+- **Queue sidebar**: slides in from right; sections: previously in queue (songs
+  above current in source list), now playing, added to queue (manual), playing
+  next (remaining songs in source list). Tap to jump, drag to reorder manual
+  queue, remove from manual queue.
+- **Lyrics overlay**: replaces main content with lyrics text
+- **Upload modal**: audio file + cover image upload with preview
+- **Server modal**: server status, sync, fetch, analytics refresh
+- **Playlist overlay**: modal dialog with playlist header (cover, editable name,
+  track count, duration), Play All/Add Songs/Delete buttons, song list with
+  reorder/remove/queue, and searchable add-song panel
 
-BASE = "http://localhost:5000"
+## Mobile UI (SoundCloud-inspired)
 
-# Upload
-with open("track.mp3", "rb") as fh:
-    r = requests.post(f"{BASE}/upload", files={"file": fh})
-song_id = r.json()["id"]
+- **Home tab**: recently played, artists (tap no-image artists to upload),
+  playlists (tap to open playlist overlay), recommendations
+- **Library tab**: search bar, song list with "..." menu for play/queue/set
+  cover/add to playlist
+- **Analytics tab**: stat cards + recharts charts + yearly wrapped section
+- **Sync tab**: card rows for server status, sync status, fetch songs
+- **Mini player bar**: tappable, shows cover + title + play/pause + progress
+- **Full-screen overlay** (tap mini player): cover art (blurred when paused),
+  prev/play/next controls, seek bar, swipe left/right, shuffle/queue/repeat.
+  Repeat icon uses SVG with "1" for single-song repeat (SoundCloud style).
+- **Queue overlay**: same section layout as desktop queue
+- **Playlist overlay**: full-screen overlay with same functionality as desktop
 
-# Log a play with an idempotent UUID
-requests.post(f"{BASE}/playlog", json={
-    "id": str(uuid.uuid4()),
-    "song_id": song_id,
-    "duration": 210.0,
-    "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-})
+## Shared Audio Architecture
 
-print(requests.get(f"{BASE}/analytics").json())
-```
+A single `<audio>` element lives in `App.jsx` and is shared across all UIs.
+The mobile mini player, full-screen overlay, and desktop player bar all
+control the same audio instance via shared state and callbacks. This prevents
+the double-audio bug where multiple audio elements could play simultaneously.
+
+## Queue Model
+
+- **Source list**: the library (all songs by upload order) or a playlist's songs,
+  depending on where you start playback
+- **Source index**: position of the currently playing song within the source list
+- **Manual queue**: songs explicitly added via "Add to Queue"; these play before
+  continuing through the source list
+- **Playing from Library**: if you play Igloo from the library, the queue shows
+  all library songs with Igloo highlighted as current
+- **Playing from Playlist**: if you play a song from a playlist overlay, the
+  queue switches to that playlist's songs
+
+## Resume Playback
+
+On song change, `{ songId, position }` is saved to `localStorage`. When the
+app loads, it restores the last-played song at the saved position in a
+**paused** state -- no auto-play.
+
+## Yearly Analytics (Wrapped)
+
+The `GET /analytics/wrapped?year=YYYY` endpoint returns stats for a
+Dec 1 to Nov 30 yearly window. Both UIs include a year selector dropdown
+to browse yearly stats. In December, the current year's wrapped data
+represents the full "Spotify Wrapped"-style annual summary.
+
+## Repeat Modes (both UIs)
+
+Cycle: no repeat -> repeat playlist -> repeat individual song
+
+Repeat icons use SVG arrows instead of emojis. The single-song repeat icon
+shows a bold "1" in the center of the repeat arrows (matching SoundCloud's
+orange repeat-one style).
 
 ---
 
 ## Notes
 
-- CORS is open to everything, which is fine on a trusted home network.
-  Do not expose this server to the public internet without adding auth.
-- Max upload size is 100 MB (`MAX_CONTENT_LENGTH` in `app.py`).
-- Only `.mp3` and `.wav` are accepted. File names are sanitized with
-  `werkzeug.secure_filename` and prefixed with the song UUID to avoid
-  collisions.
-- `data/music.db` and `storage/` are ignored by git; delete them to reset
-  the library.
+- CORS is open, fine on a trusted home network. Do not expose publicly
+  without adding auth.
+- Max upload: 100 MB. Only `.mp3` and `.wav` audio. Cover images accept
+  `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`.
+- `data/music.db` and `storage/` are gitignored; delete them to reset.
+- Shuffle toggle is wired to state but shuffle logic for randomizing the
+  queue is a future addition.
+- Cover images can be set for existing songs via the right-click (desktop)
+  or "..." menu (mobile) using the "Set Cover" option.
+- Artist images can be uploaded by clicking/tapping an artist card that has
+  no image yet.

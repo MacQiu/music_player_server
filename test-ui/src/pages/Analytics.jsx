@@ -1,4 +1,22 @@
+import { useState, useEffect } from 'react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { getWrappedAnalytics } from '../api/client';
+
 export default function Analytics({ analytics, loading }) {
+  const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth();
+  const [wrappedYear, setWrappedYear] = useState(currentYear);
+  const [wrapped, setWrapped] = useState(null);
+  const [wrappedLoading, setWrappedLoading] = useState(false);
+
+  useEffect(() => {
+    setWrappedLoading(true);
+    getWrappedAnalytics(wrappedYear)
+      .then(data => setWrapped(data))
+      .catch(() => setWrapped(null))
+      .finally(() => setWrappedLoading(false));
+  }, [wrappedYear]);
+
   if (loading) return <div className="page"><p>Loading analytics...</p></div>;
   if (!analytics) return <div className="page"><p className="muted">No analytics data</p></div>;
 
@@ -13,6 +31,17 @@ export default function Analytics({ analytics, loading }) {
     parts.push(`${s}s`);
     return parts.join(' ');
   };
+
+  const songChartData = (analytics.top_songs || []).slice(0, 5).map(s => ({
+    name: s.title.length > 12 ? s.title.slice(0, 12) + '\u2026' : s.title, plays: s.play_count,
+  }));
+
+  const artistChartData = (analytics.top_artists || []).slice(0, 5).map(a => ({
+    name: a.artist.length > 12 ? a.artist.slice(0, 12) + '\u2026' : a.artist, minutes: Math.round((a.total_time || 0) / 60),
+  }));
+
+  const years = [];
+  for (let y = currentYear; y >= currentYear - 5; y--) years.push(y);
 
   return (
     <div className="page page--analytics">
@@ -31,47 +60,72 @@ export default function Analytics({ analytics, loading }) {
 
       <section>
         <h3>Top Songs</h3>
-        {analytics.top_songs.length === 0 && <p className="muted">No plays yet</p>}
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>#</th><th>Title</th><th>Artist</th><th>Plays</th><th>Time</th>
-            </tr>
-          </thead>
-          <tbody>
-            {analytics.top_songs.map((s, i) => (
-              <tr key={s.id}>
-                <td>{i + 1}</td>
-                <td>{s.title}</td>
-                <td>{s.artist || '—'}</td>
-                <td>{s.play_count}</td>
-                <td>{fmtTime(s.total_time)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {songChartData.length === 0 ? <p className="muted">No plays yet</p> : (
+          <div className="chart-container chart-container--mobile">
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={songChartData}>
+                <XAxis dataKey="name" tick={{ fill: '#8b8d9a', fontSize: 10 }} />
+                <YAxis tick={{ fill: '#8b8d9a', fontSize: 10 }} />
+                <Tooltip contentStyle={{ background: '#1a1d27', border: '1px solid #2d3142', borderRadius: 8, color: '#e8e8ed', fontSize: 12 }} />
+                <Bar dataKey="plays" fill="#6c63ff" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </section>
 
       <section>
-        <h3>Top Artists</h3>
-        {analytics.top_artists.length === 0 && <p className="muted">No artist data</p>}
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>#</th><th>Artist</th><th>Plays</th><th>Time</th>
-            </tr>
-          </thead>
-          <tbody>
-            {analytics.top_artists.map((a, i) => (
-              <tr key={a.artist}>
-                <td>{i + 1}</td>
-                <td>{a.artist}</td>
-                <td>{a.play_count}</td>
-                <td>{fmtTime(a.total_time)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <h3>Top Artists (min)</h3>
+        {artistChartData.length === 0 ? <p className="muted">No artist data</p> : (
+          <div className="chart-container chart-container--mobile">
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={artistChartData}>
+                <XAxis dataKey="name" tick={{ fill: '#8b8d9a', fontSize: 10 }} />
+                <YAxis tick={{ fill: '#8b8d9a', fontSize: 10 }} />
+                <Tooltip contentStyle={{ background: '#1a1d27', border: '1px solid #2d3142', borderRadius: 8, color: '#e8e8ed', fontSize: 12 }} />
+                <Bar dataKey="minutes" fill="#22c55e" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </section>
+
+      <section>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '.4rem' }}>
+          <h3>{currentMonth === 11 ? 'Wrapped ' : 'Yearly '}Stats {wrappedYear}</h3>
+          <select value={wrappedYear} onChange={e => setWrappedYear(Number(e.target.value))}
+            style={{ background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 'var(--radius-sm)', padding: '.2rem .4rem', fontSize: '.78rem' }}>
+            {years.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        {wrappedLoading ? <p className="muted">Loading...</p> : wrapped ? (
+          <>
+            <div className="stats-row">
+              <div className="stat-card">
+                <div className="stat-card__value">{wrapped.total_plays}</div>
+                <div className="stat-card__label">Plays</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-card__value">{fmtTime(wrapped.total_listening_time)}</div>
+                <div className="stat-card__label">Time</div>
+              </div>
+            </div>
+            {(wrapped.top_songs || []).length > 0 && (
+              <div className="chart-container chart-container--mobile">
+                <ResponsiveContainer width="100%" height={150}>
+                  <BarChart data={(wrapped.top_songs || []).slice(0, 5).map(s => ({
+                    name: s.title.length > 10 ? s.title.slice(0, 10) + '\u2026' : s.title, plays: s.play_count,
+                  }))}>
+                    <XAxis dataKey="name" tick={{ fill: '#8b8d9a', fontSize: 9 }} />
+                    <YAxis tick={{ fill: '#8b8d9a', fontSize: 9 }} />
+                    <Tooltip contentStyle={{ background: '#1a1d27', border: '1px solid #2d3142', borderRadius: 8, color: '#e8e8ed', fontSize: 11 }} />
+                    <Bar dataKey="plays" fill="#ff5500" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </>
+        ) : <p className="muted">No data for {wrappedYear}</p>}
       </section>
     </div>
   );

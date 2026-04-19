@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS songs (
     album       TEXT,
     duration    REAL,
     file_path   TEXT NOT NULL,
+    cover_path  TEXT,
     date_added  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -46,6 +47,27 @@ CREATE TABLE IF NOT EXISTS playlogs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_playlogs_song ON playlogs(song_id);
+
+CREATE TABLE IF NOT EXISTS playlists (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS playlist_songs (
+    playlist_id TEXT NOT NULL,
+    song_id     TEXT NOT NULL,
+    position    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (playlist_id, song_id),
+    FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+    FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS artists (
+    name        TEXT PRIMARY KEY,
+    image_path  TEXT,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -54,6 +76,11 @@ def init_db() -> None:
     os.makedirs(DB_DIR, exist_ok=True)
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        # Migrate existing DBs that lack the cover_path column.
+        try:
+            conn.execute("SELECT cover_path FROM songs LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute("ALTER TABLE songs ADD COLUMN cover_path TEXT")
         conn.commit()
 
 
