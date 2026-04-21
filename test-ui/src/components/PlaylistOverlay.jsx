@@ -13,6 +13,8 @@ export default function PlaylistOverlay({
   const [nameValue, setNameValue] = useState('');
   const nameInputRef = useRef(null);
 
+  const isWrapped = playlist?.is_wrapped || false;
+
   const fetchPlaylist = async () => {
     try {
       const data = await getPlaylist(playlistId);
@@ -95,6 +97,18 @@ export default function PlaylistOverlay({
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
+  const fmtListeningTime = (secs) => {
+    if (!secs) return '0s';
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = Math.floor(secs % 60);
+    const parts = [];
+    if (h) parts.push(`${h}h`);
+    if (m) parts.push(`${m}m`);
+    parts.push(`${s}s`);
+    return parts.join(' ');
+  };
+
   const totalDuration = playlist?.songs?.reduce((acc, s) => acc + (s.duration || 0), 0) || 0;
 
   if (loading) {
@@ -123,13 +137,15 @@ export default function PlaylistOverlay({
           {coverUrl ? <img src={coverUrl} alt="" /> : <div className="playlist-overlay__cover-blank">♪</div>}
         </div>
         <div className="playlist-overlay__meta">
-          {editingName ? (
+          {!isWrapped && editingName ? (
             <input className="playlist-overlay__name-input" value={nameValue}
               onChange={e => setNameValue(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleRename()}
               onBlur={handleRename} autoFocus ref={nameInputRef} />
           ) : (
-            <h2 className="playlist-overlay__name" onClick={() => setEditingName(true)}>{playlist?.name}</h2>
+            <h2 className="playlist-overlay__name"
+              onClick={isWrapped ? undefined : () => setEditingName(true)}
+              style={isWrapped ? { cursor: 'default' } : undefined}>{playlist?.name}</h2>
           )}
           <div className="playlist-overlay__stats">
             {playlist?.songs?.length || 0} tracks &middot; {fmtDuration(totalDuration)}
@@ -142,16 +158,20 @@ export default function PlaylistOverlay({
           <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
           Play All
         </button>
-        <button className="btn btn--ghost" onClick={() => setShowAddSongs(!showAddSongs)}>
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-          Add Songs
-        </button>
-        <button className="btn btn--ghost btn--danger" onClick={handleDelete} title="Delete Playlist">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-        </button>
+        {!isWrapped && (
+          <>
+            <button className="btn btn--ghost" onClick={() => setShowAddSongs(!showAddSongs)}>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+              Add Songs
+            </button>
+            <button className="btn btn--ghost btn--danger" onClick={handleDelete} title="Delete Playlist">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+            </button>
+          </>
+        )}
       </div>
 
-      {showAddSongs && (
+      {!isWrapped && showAddSongs && (
         <div className="playlist-overlay__add-section">
           <div className="search-bar" style={{ marginBottom: '.5rem' }}>
             <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
@@ -178,8 +198,10 @@ export default function PlaylistOverlay({
       <div className="playlist-overlay__songs">
         {(playlist?.songs || []).map((song, idx) => (
           <div key={song.id} className="playlist-overlay__song-row"
-            draggable onDragStart={e => handleDragStart(e, idx)}
-            onDragOver={e => e.preventDefault()} onDrop={e => handleDrop(e, idx)}>
+            draggable={!isWrapped}
+            onDragStart={isWrapped ? undefined : e => handleDragStart(e, idx)}
+            onDragOver={isWrapped ? undefined : e => e.preventDefault()}
+            onDrop={isWrapped ? undefined : e => handleDrop(e, idx)}>
             <div className="playlist-overlay__song-cover" onClick={() => handlePlaySong(song)}>
               {song.cover_url ? <img src={`/api${song.cover_url}`} alt="" /> : <span>♪</span>}
             </div>
@@ -187,11 +209,20 @@ export default function PlaylistOverlay({
               <div className="playlist-overlay__song-title">{song.title}</div>
               <div className="playlist-overlay__song-artist">{song.artist || 'Unknown'}</div>
             </div>
-            <button className="btn btn--sm btn--ghost" onClick={() => addToQueue(song)} title="Add to Queue">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18a3 3 0 103 3V8h3V6h-5z"/></svg>
-            </button>
-            <button className="btn btn--sm btn--ghost" onClick={() => handleRemoveSong(song.id)} title="Remove">✕</button>
-            <span className="playlist-overlay__drag">☰</span>
+            {isWrapped ? (
+              <div className="playlist-overlay__song-stats">
+                <span>{song.play_count || 0} plays</span>
+                <span>{fmtListeningTime(song.total_time)}</span>
+              </div>
+            ) : (
+              <>
+                <button className="btn btn--sm btn--ghost" onClick={() => addToQueue(song)} title="Add to Queue">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18a3 3 0 103 3V8h3V6h-5z"/></svg>
+                </button>
+                <button className="btn btn--sm btn--ghost" onClick={() => handleRemoveSong(song.id)} title="Remove">✕</button>
+                <span className="playlist-overlay__drag">☰</span>
+              </>
+            )}
           </div>
         ))}
         {(!playlist?.songs || playlist.songs.length === 0) && (

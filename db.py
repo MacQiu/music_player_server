@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS songs (
     duration    REAL,
     file_path   TEXT NOT NULL,
     cover_path  TEXT,
+    sort_order  INTEGER DEFAULT 0,
     date_added  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -81,6 +82,23 @@ def init_db() -> None:
             conn.execute("SELECT cover_path FROM songs LIMIT 1")
         except sqlite3.OperationalError:
             conn.execute("ALTER TABLE songs ADD COLUMN cover_path TEXT")
+        # Migrate existing DBs that lack the sort_order column.
+        try:
+            conn.execute("SELECT sort_order FROM songs LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute("ALTER TABLE songs ADD COLUMN sort_order INTEGER DEFAULT 0")
+            conn.execute(
+                "UPDATE songs SET sort_order = ("
+                "  SELECT COUNT(*) FROM songs s2 WHERE s2.date_added > songs.date_added"
+                ")"
+            )
+        # Backfill artists table from songs that pre-date the artists table.
+        conn.execute(
+            "INSERT OR IGNORE INTO artists (name) "
+            "SELECT DISTINCT artist FROM songs "
+            "WHERE artist IS NOT NULL AND artist <> '' "
+            "AND artist NOT IN (SELECT name FROM artists)"
+        )
         conn.commit()
 
 

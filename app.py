@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import logging
 import os
+import random
+import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 from flask import Flask, g, jsonify, request, send_from_directory
@@ -110,8 +112,8 @@ def create_app() -> Flask:
     def list_songs():
         with db.get_conn() as conn:
             rows = conn.execute(
-                "SELECT id, title, artist, album, duration, file_path, cover_path, date_added "
-                "FROM songs ORDER BY date_added DESC"
+                "SELECT id, title, artist, album, duration, file_path, cover_path, sort_order, date_added "
+                "FROM songs ORDER BY sort_order ASC, date_added DESC"
             ).fetchall()
         result = []
         for r in rows:
@@ -119,6 +121,19 @@ def create_app() -> Flask:
             d["cover_url"] = f"/covers/{d['id']}" if d.get("cover_path") else None
             result.append(d)
         return jsonify(result)
+
+    @app.put("/songs/order")
+    def reorder_songs():
+        body = request.get_json(silent=True) or {}
+        song_ids = body.get("song_ids")
+        if not isinstance(song_ids, list):
+            return jsonify({"error": "song_ids must be a list"}), 400
+        with db.get_conn() as conn:
+            for pos, sid in enumerate(song_ids):
+                conn.execute(
+                    "UPDATE songs SET sort_order = ? WHERE id = ?", (pos, sid)
+                )
+        return jsonify({"ok": True})
 
     @app.post("/upload")
     def upload():
@@ -336,19 +351,44 @@ def create_app() -> Flask:
             ).fetchone()
             if not pl:
                 return jsonify({"error": "playlist not found"}), 404
-            songs = conn.execute(
-                "SELECT s.id, s.title, s.artist, s.album, s.duration, "
-                "s.cover_path, s.date_added, ps.position "
-                "FROM playlist_songs ps JOIN songs s ON s.id = ps.song_id "
-                "WHERE ps.playlist_id = ? ORDER BY ps.position",
-                (playlist_id,),
-            ).fetchall()
+
+            m = re.match(r"^Your (\d{4}) Playback$", pl["name"])
+            is_wrapped = bool(m)
+
+            if is_wrapped:
+                year = int(m.group(1))
+                start_date = f"{year - 1}-12-01"
+                end_date = f"{year}-11-30"
+                songs = conn.execute(
+                    "SELECT s.id, s.title, s.artist, s.album, s.duration, "
+                    "s.cover_path, ps.position, "
+                    "COUNT(p.id) AS play_count, "
+                    "COALESCE(SUM(p.duration), 0) AS total_time "
+                    "FROM playlist_songs ps JOIN songs s ON s.id = ps.song_id "
+                    "LEFT JOIN playlogs p ON p.song_id = s.id "
+                    "AND DATE(p.timestamp) >= ? AND DATE(p.timestamp) <= ? "
+                    "WHERE ps.playlist_id = ? "
+                    "GROUP BY s.id ORDER BY ps.position",
+                    (start_date, end_date, playlist_id),
+                ).fetchall()
+            else:
+                songs = conn.execute(
+                    "SELECT s.id, s.title, s.artist, s.album, s.duration, "
+                    "s.cover_path, s.date_added, ps.position "
+                    "FROM playlist_songs ps JOIN songs s ON s.id = ps.song_id "
+                    "WHERE ps.playlist_id = ? ORDER BY ps.position",
+                    (playlist_id,),
+                ).fetchall()
+
         song_list = []
         for s in songs:
             d = dict(s)
             d["cover_url"] = f"/covers/{d['id']}" if d.get("cover_path") else None
             song_list.append(d)
-        return jsonify({"id": pl["id"], "name": pl["name"], "created_at": pl["created_at"], "songs": song_list})
+        return jsonify({
+            "id": pl["id"], "name": pl["name"], "created_at": pl["created_at"],
+            "is_wrapped": is_wrapped, "songs": song_list,
+        })
 
     @app.put("/playlists/<playlist_id>")
     def update_playlist(playlist_id: str):
@@ -541,17 +581,17 @@ def create_app() -> Flask:
                 "COALESCE(SUM(play_count), 0) AS total_plays FROM analytics"
             ).fetchone()
 
-            recommendations = conn.execute(
+            rec_candidates = conn.execute(
                 """
                 SELECT s.id, s.title, s.artist, s.cover_path, a.play_count, a.last_played
                 FROM analytics a
                 JOIN songs s ON s.id = a.song_id
                 WHERE a.play_count > 0
-                ORDER BY a.play_count DESC,
-                         COALESCE(a.last_played, '1970-01-01') ASC
-                LIMIT 5
+                ORDER BY a.play_count DESC
+                LIMIT 15
                 """
             ).fetchall()
+            recommendations = random.sample(rec_candidates, min(5, len(rec_candidates)))
 
             play_history = conn.execute(
                 """
@@ -697,6 +737,166 @@ def create_app() -> Flask:
         with open(path, "r", encoding="utf-8") as fh:
             text = fh.read()
         return jsonify({"song_id": song_id, "lyrics": text})
+
+    @app.post("/lyrics/<song_id>")
+    def save_lyrics(song_id: str):
+        data = request.get_json(silent=True) or {}
+        lrc_text = data.get("lyrics", "")
+        path = os.path.join(LYRICS_DIR, f"{song_id}.lrc")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(lrc_text)
+        return jsonify({"ok": True})
+
+    # =====================================================================
+    #  Wrapped playlist generation
+    # =====================================================================
+
+    @app.post("/wrapped/<int:year>/playlist")
+    def create_wrapped_playlist(year: int):
+        start_date = f"{year - 1}-12-01"
+        end_date = f"{year}-11-30"
+
+        with db.get_conn() as conn:
+            top_songs = conn.execute(
+                """
+                SELECT s.id, COUNT(*) AS play_count
+                FROM playlogs p JOIN songs s ON s.id = p.song_id
+                WHERE DATE(p.timestamp) >= ? AND DATE(p.timestamp) <= ?
+                GROUP BY s.id
+                ORDER BY play_count DESC
+                """,
+                (start_date, end_date),
+            ).fetchall()
+
+            if not top_songs:
+                return jsonify({"error": "no play data for this year"}), 400
+
+            playlist_name = f"Your {year} Playback"
+            existing = conn.execute(
+                "SELECT id FROM playlists WHERE name = ?", (playlist_name,)
+            ).fetchone()
+
+            if existing:
+                pid = existing["id"]
+                conn.execute(
+                    "DELETE FROM playlist_songs WHERE playlist_id = ?", (pid,)
+                )
+            else:
+                pid = utils.new_id()
+                conn.execute(
+                    "INSERT INTO playlists (id, name) VALUES (?, ?)",
+                    (pid, playlist_name),
+                )
+
+            for pos, row in enumerate(top_songs):
+                conn.execute(
+                    "INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)",
+                    (pid, row["id"], pos),
+                )
+
+        return jsonify({"ok": True, "playlist_id": pid, "name": playlist_name, "song_count": len(top_songs)})
+
+    # =====================================================================
+    #  Dev / testing tools
+    # =====================================================================
+
+    @app.post("/dev/generate-playlogs")
+    def dev_generate_playlogs():
+        body = request.get_json(silent=True) or {}
+        try:
+            year = int(body.get("year", datetime.now().year))
+        except (TypeError, ValueError):
+            year = datetime.now().year
+        count = min(int(body.get("count", 200)), 5000)
+
+        start_dt = datetime(year - 1, 12, 1)
+        end_dt = datetime(year, 11, 30, 23, 59, 59)
+        span_seconds = int((end_dt - start_dt).total_seconds())
+
+        with db.get_conn() as conn:
+            song_ids = [
+                r["id"] for r in conn.execute("SELECT id FROM songs").fetchall()
+            ]
+            if not song_ids:
+                return jsonify({"error": "no songs in library"}), 400
+
+            inserted = 0
+            for _ in range(count):
+                sid = random.choice(song_ids)
+                dur = random.uniform(30, 240)
+                offset = random.randint(0, span_seconds)
+                ts = (start_dt + timedelta(seconds=offset)).isoformat()
+                log_id = utils.new_id()
+                was_new = db.insert_playlog_and_update_analytics(
+                    conn, log_id, sid, dur, ts
+                )
+                if was_new:
+                    inserted += 1
+
+        return jsonify({"ok": True, "inserted": inserted, "year": year})
+
+    @app.delete("/dev/playlogs")
+    def dev_delete_playlogs():
+        body = request.get_json(silent=True) or {}
+        try:
+            year = int(body.get("year", datetime.now().year))
+        except (TypeError, ValueError):
+            year = datetime.now().year
+
+        start_date = f"{year - 1}-12-01"
+        end_date = f"{year}-11-30"
+
+        with db.get_conn() as conn:
+            result = conn.execute(
+                "DELETE FROM playlogs WHERE DATE(timestamp) >= ? AND DATE(timestamp) <= ?",
+                (start_date, end_date),
+            )
+            deleted = result.rowcount
+
+            conn.execute(
+                """
+                UPDATE analytics SET
+                    play_count = (SELECT COUNT(*) FROM playlogs WHERE playlogs.song_id = analytics.song_id),
+                    total_time = (SELECT COALESCE(SUM(duration), 0) FROM playlogs WHERE playlogs.song_id = analytics.song_id),
+                    last_played = (SELECT MAX(timestamp) FROM playlogs WHERE playlogs.song_id = analytics.song_id)
+                """
+            )
+
+        return jsonify({"ok": True, "deleted": deleted, "year": year})
+
+    @app.post("/dev/playback-playlist")
+    def dev_create_playback_playlist():
+        body = request.get_json(silent=True) or {}
+        try:
+            year = int(body.get("year"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "year is required"}), 400
+        song_ids = body.get("song_ids")
+        if not isinstance(song_ids, list) or len(song_ids) == 0:
+            return jsonify({"error": "song_ids must be a non-empty list"}), 400
+
+        playlist_name = f"Your {year} Playback"
+        with db.get_conn() as conn:
+            existing = conn.execute(
+                "SELECT id FROM playlists WHERE name = ?", (playlist_name,)
+            ).fetchone()
+            if existing:
+                pid = existing["id"]
+                conn.execute(
+                    "DELETE FROM playlist_songs WHERE playlist_id = ?", (pid,)
+                )
+            else:
+                pid = utils.new_id()
+                conn.execute(
+                    "INSERT INTO playlists (id, name) VALUES (?, ?)",
+                    (pid, playlist_name),
+                )
+            for pos, sid in enumerate(song_ids):
+                conn.execute(
+                    "INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)",
+                    (pid, sid, pos),
+                )
+        return jsonify({"ok": True, "playlist_id": pid, "name": playlist_name, "song_count": len(song_ids)})
 
     return app
 

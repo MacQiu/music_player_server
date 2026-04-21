@@ -1,7 +1,7 @@
 import { useMemo, useState, useRef } from 'react';
 import { createPlaylist, uploadArtistImage } from '../api/client';
 
-export default function Home({ songs, analytics, playlists, artists, onPlay, onRefreshPlaylists, addToQueue, onOpenPlaylist, refreshArtists }) {
+export default function Home({ songs, analytics, playlists, artists, onPlay, onRefreshPlaylists, addToQueue, onOpenPlaylist, onOpenArtist, refreshArtists, imgVersion, bumpImgVersion }) {
   const [showNewPlaylist, setShowNewPlaylist] = useState(false);
   const [newName, setNewName] = useState('');
   const artistInputRef = useRef(null);
@@ -28,6 +28,10 @@ export default function Home({ songs, analytics, playlists, artists, onPlay, onR
 
   const recommendations = analytics?.recommendations ?? [];
 
+  const isPlaybackPlaylist = (name) => /^Your \d{4} Playback$/.test(name);
+  const userPlaylists = useMemo(() => (playlists || []).filter(p => !isPlaybackPlaylist(p.name)), [playlists]);
+  const wrappedPlaylists = useMemo(() => (playlists || []).filter(p => isPlaybackPlaylist(p.name)), [playlists]);
+
   const handleCreate = async () => {
     const name = newName.trim();
     if (!name) return;
@@ -42,10 +46,12 @@ export default function Home({ songs, analytics, playlists, artists, onPlay, onR
   const handleArtistImageFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file || !uploadArtistName) return;
-    try { await uploadArtistImage(uploadArtistName, file); refreshArtists?.(); } catch { /* ignore */ }
+    try { await uploadArtistImage(uploadArtistName, file); refreshArtists?.(); bumpImgVersion?.(); } catch { /* ignore */ }
     setUploadArtistName(null);
     e.target.value = '';
   };
+
+  const iv = imgVersion ? `?v=${imgVersion}` : '';
 
   return (
     <div className="page page--home">
@@ -59,7 +65,7 @@ export default function Home({ songs, analytics, playlists, artists, onPlay, onR
           {recentlyPlayed.map((s) => (
             <button key={s.id} className="card" onClick={() => onPlay(s)}>
               <div className="card__img">
-                {s.cover_url ? <img src={`/api${s.cover_url}`} alt="" /> : <div className="card__img-blank">♪</div>}
+                {s.cover_url ? <img src={`/api${s.cover_url}${iv}`} alt="" /> : <div className="card__img-blank">♪</div>}
               </div>
               <div className="card__title">{s.title}</div>
               <div className="card__sub">{s.artist || 'Unknown'}</div>
@@ -73,16 +79,18 @@ export default function Home({ songs, analytics, playlists, artists, onPlay, onR
         {derivedArtists.length === 0 && <p className="muted">No artists yet</p>}
         <div className="card-row">
           {derivedArtists.map((a) => (
-            <div key={a.name} className="card"
-              onClick={() => !a.image_url && handleArtistImageClick(a.name)}
-              style={!a.image_url ? { cursor: 'pointer' } : {}}>
+            <div key={a.name} className="card" style={{ cursor: 'pointer' }}
+              onClick={() => onOpenArtist?.(a.name)}>
               <div className="card__img card__img--round">
-                {a.image_url ? <img src={`/api${a.image_url}`} alt="" /> : <div className="card__img-blank">🎤</div>}
+                {a.image_url ? <img src={`/api${a.image_url}${iv}`} alt="" /> : <div className="card__img-blank">🎤</div>}
               </div>
               <div className="card__title">{a.name}</div>
               <div className="card__sub">
                 {a.song_count} song{a.song_count !== 1 ? 's' : ''}
-                {!a.image_url && <span style={{ fontSize: '.6rem' }}> (tap to add)</span>}
+                {!a.image_url && (
+                  <span style={{ fontSize: '.6rem', textDecoration: 'underline' }}
+                    onClick={(e) => { e.stopPropagation(); handleArtistImageClick(a.name); }}> (add image)</span>
+                )}
               </div>
             </div>
           ))}
@@ -92,10 +100,10 @@ export default function Home({ songs, analytics, playlists, artists, onPlay, onR
       <section>
         <h3>Playlists</h3>
         <div className="card-row">
-          {(playlists || []).map((p) => (
+          {userPlaylists.map((p) => (
             <button key={p.id} className="card" onClick={() => onOpenPlaylist(p.id)}>
               <div className="card__img">
-                {p.cover_url ? <img src={`/api${p.cover_url}`} alt="" /> : <div className="card__img-blank">♪</div>}
+                {p.cover_url ? <img src={`/api${p.cover_url}${iv}`} alt="" /> : <div className="card__img-blank">♪</div>}
               </div>
               <div className="card__title">{p.name}</div>
               <div className="card__sub">{p.song_count} song{p.song_count !== 1 ? 's' : ''}</div>
@@ -116,6 +124,23 @@ export default function Home({ songs, analytics, playlists, artists, onPlay, onR
         )}
       </section>
 
+      {wrappedPlaylists.length > 0 && (
+        <section>
+          <h3>Wrapped</h3>
+          <div className="card-row">
+            {wrappedPlaylists.map((p) => (
+              <button key={p.id} className="card" onClick={() => onOpenPlaylist(p.id)}>
+                <div className="card__img">
+                  {p.cover_url ? <img src={`/api${p.cover_url}${iv}`} alt="" /> : <div className="card__img-blank">🎁</div>}
+                </div>
+                <div className="card__title">{p.name}</div>
+                <div className="card__sub">{p.song_count} song{p.song_count !== 1 ? 's' : ''}</div>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       {recommendations.length > 0 && (
         <section>
           <h3>Recommended</h3>
@@ -123,7 +148,7 @@ export default function Home({ songs, analytics, playlists, artists, onPlay, onR
             {recommendations.map((r) => (
               <button key={r.id} className="card" onClick={() => { const s = songs.find(x => x.id === r.id); if (s) onPlay(s); }}>
                 <div className="card__img">
-                  {r.cover_url ? <img src={`/api${r.cover_url}`} alt="" /> : <div className="card__img-blank">★</div>}
+                  {r.cover_url ? <img src={`/api${r.cover_url}${iv}`} alt="" /> : <div className="card__img-blank">★</div>}
                 </div>
                 <div className="card__title">{r.title}</div>
                 <div className="card__sub">{r.artist || 'Unknown'}</div>

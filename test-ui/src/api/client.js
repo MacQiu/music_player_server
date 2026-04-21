@@ -40,6 +40,10 @@ export async function uploadSong(file, metadata = {}, coverFile = null) {
   return request('POST', '/upload', { body: form, isFormData: true });
 }
 
+export async function reorderLibrary(songIds) {
+  return request('PUT', '/songs/order', { body: { song_ids: songIds } });
+}
+
 export async function deleteSong(songId) {
   return request('DELETE', `/songs/${songId}`);
 }
@@ -140,4 +144,28 @@ export async function getWrappedAnalytics(year) {
 
 export async function getLyrics(songId) {
   return request('GET', `/lyrics/${songId}`);
+}
+
+export async function saveLyrics(songId, lrcText) {
+  return request('POST', `/lyrics/${songId}`, { body: { lyrics: lrcText } });
+}
+
+// ---- Wrapped ----
+
+export async function createWrappedPlaylist(year) {
+  return request('POST', `/wrapped/${year}/playlist`);
+}
+
+// ---- Dev tools ----
+
+export async function generateTestPlaylogs(year, count = 200) {
+  return request('POST', '/dev/generate-playlogs', { body: { year, count } });
+}
+
+export async function deleteTestPlaylogs(year) {
+  return request('DELETE', '/dev/playlogs', { body: { year } });
+}
+
+export async function createEmptyPlaybackPlaylist(year, songIds) {
+  return request('POST', '/dev/playback-playlist', { body: { year, song_ids: songIds } });
 }

@@ -1,4 +1,14 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
+import LyricsOverlay from './LyricsOverlay';
+
+const ShuffleIcon = ({ active }) => {
+  const color = active ? '#ff5500' : 'rgba(255,255,255,.5)';
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" fill={color}>
+      <path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/>
+    </svg>
+  );
+};
 
 const RepeatIcon = ({ mode }) => {
   const active = mode !== 'none';
@@ -15,8 +25,10 @@ export default function MobilePlayerOverlay({
   song, onClose, onShowQueue,
   playing, currentTime, duration, toggle, seek,
   repeatMode, shuffleEnabled, playNext, playPrevious, toggleRepeat, toggleShuffle,
+  audioRef,
 }) {
   const touchStartX = useRef(0);
+  const [showLyrics, setShowLyrics] = useState(false);
 
   const fmt = (s) => {
     if (!s || !isFinite(s)) return '0:00';
@@ -32,6 +44,15 @@ export default function MobilePlayerOverlay({
   };
 
   const coverUrl = song?.cover_url ? `/api${song.cover_url}` : null;
+
+  if (showLyrics) {
+    return (
+      <div className="mobile-overlay" style={{ display: 'flex', flexDirection: 'column' }}>
+        <LyricsOverlay song={song} onClose={() => setShowLyrics(false)}
+          currentTime={currentTime} audioRef={audioRef} readOnly />
+      </div>
+    );
+  }
 
   return (
     <div className="mobile-overlay" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
@@ -74,7 +95,10 @@ export default function MobilePlayerOverlay({
 
       <div className="mobile-overlay__bottom">
         <button className={`mobile-overlay__bottom-btn ${shuffleEnabled ? 'mobile-overlay__bottom-btn--active' : ''}`} onClick={toggleShuffle}>
-          🔀
+          <ShuffleIcon active={shuffleEnabled} />
+        </button>
+        <button className="mobile-overlay__bottom-btn" onClick={() => setShowLyrics(true)}>
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="white"><path d="M12 3v10.55A4 4 0 1014 17V7h4V3h-6z"/></svg>
         </button>
         <button className="mobile-overlay__bottom-btn" onClick={onShowQueue}>
           <svg viewBox="0 0 24 24" width="22" height="22" fill="white"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18a3 3 0 103 3V8h3V6h-5z"/></svg>

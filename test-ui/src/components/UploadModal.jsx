@@ -1,7 +1,7 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { uploadSong } from '../api/client';
 
-export default function UploadModal({ onClose, onUploaded }) {
+export default function UploadModal({ onClose, onUploaded, songs = [] }) {
   const [file, setFile] = useState(null);
   const [cover, setCover] = useState(null);
   const [coverPreview, setCoverPreview] = useState(null);
@@ -10,13 +10,38 @@ export default function UploadModal({ onClose, onUploaded }) {
   const [album, setAlbum] = useState('');
   const [status, setStatus] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [showExisting, setShowExisting] = useState(false);
   const coverRef = useRef(null);
+
+  const existingCovers = useMemo(() => {
+    const seen = new Set();
+    return songs.filter(s => {
+      if (!s.cover_url) return false;
+      const key = `${s.artist || ''}::${s.album || ''}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [songs]);
 
   const handleCoverChange = (e) => {
     const f = e.target.files[0];
     if (!f) return;
     setCover(f);
     setCoverPreview(URL.createObjectURL(f));
+    setShowExisting(false);
+  };
+
+  const handlePickExisting = async (song) => {
+    try {
+      const res = await fetch(`/api${song.cover_url}`);
+      const blob = await res.blob();
+      const ext = blob.type.split('/')[1] || 'jpg';
+      const file = new File([blob], `cover.${ext}`, { type: blob.type });
+      setCover(file);
+      setCoverPreview(URL.createObjectURL(blob));
+      setShowExisting(false);
+    } catch { /* ignore */ }
   };
 
   const handleSubmit = async (e) => {
@@ -54,24 +79,32 @@ export default function UploadModal({ onClose, onUploaded }) {
         </div>
         <form onSubmit={handleSubmit} className="modal__body">
           <div className="upload-modal__row">
-            <div className="upload-modal__cover" onClick={() => coverRef.current?.click()}>
-              {coverPreview ? (
-                <img src={coverPreview} alt="Cover preview" />
-              ) : (
-                <div className="upload-modal__cover-placeholder">
-                  <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor" opacity=".4">
-                    <path d="M21 19V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
-                  </svg>
-                  <span>Cover</span>
-                </div>
+            <div className="upload-modal__cover-col">
+              <div className="upload-modal__cover" onClick={() => coverRef.current?.click()}>
+                {coverPreview ? (
+                  <img src={coverPreview} alt="Cover preview" />
+                ) : (
+                  <div className="upload-modal__cover-placeholder">
+                    <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor" opacity=".4">
+                      <path d="M21 19V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+                    </svg>
+                    <span>Cover</span>
+                  </div>
+                )}
+                <input
+                  ref={coverRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleCoverChange}
+                  style={{ display: 'none' }}
+                />
+              </div>
+              {existingCovers.length > 0 && (
+                <button type="button" className="upload-modal__pick-link"
+                  onClick={() => setShowExisting(v => !v)}>
+                  {showExisting ? 'hide library covers' : 'or choose from library'}
+                </button>
               )}
-              <input
-                ref={coverRef}
-                type="file"
-                accept="image/*"
-                onChange={handleCoverChange}
-                style={{ display: 'none' }}
-              />
             </div>
             <div className="upload-modal__fields">
               <input type="file" accept=".mp3,.wav" onChange={(e) => setFile(e.target.files[0])} />
@@ -80,6 +113,16 @@ export default function UploadModal({ onClose, onUploaded }) {
               <input placeholder="Album" value={album} onChange={(e) => setAlbum(e.target.value)} />
             </div>
           </div>
+          {showExisting && (
+            <div className="upload-modal__existing">
+              {existingCovers.map(s => (
+                <button key={s.id} type="button" className="upload-modal__existing-thumb"
+                  onClick={() => handlePickExisting(s)} title={`${s.title} — ${s.artist || 'Unknown'}`}>
+                  <img src={`/api${s.cover_url}`} alt="" />
+                </button>
+              ))}
+            </div>
+          )}
           <div className="modal__footer">
             <button type="submit" className="btn btn--primary" disabled={uploading}>
               {uploading ? 'Uploading...' : 'Upload'}

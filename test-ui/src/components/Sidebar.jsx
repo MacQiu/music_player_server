@@ -1,13 +1,18 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { createPlaylist } from '../api/client';
 
 export default function Sidebar({
   view, setView, playlists,
   onOpenUpload, onOpenServer,
   onRefreshPlaylists, onOpenPlaylist,
+  devMode, toggleDevMode,
 }) {
   const [showNewPlaylist, setShowNewPlaylist] = useState(false);
   const [newName, setNewName] = useState('');
+
+  const isPlaybackPlaylist = (name) => /^Your \d{4} Playback$/.test(name);
+  const userPlaylists = useMemo(() => (playlists || []).filter(p => !isPlaybackPlaylist(p.name)), [playlists]);
+  const wrappedPlaylists = useMemo(() => (playlists || []).filter(p => isPlaybackPlaylist(p.name)), [playlists]);
 
   const handleCreate = async () => {
     const name = newName.trim();
@@ -36,6 +41,12 @@ export default function Sidebar({
             <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>
             Analytics
           </button>
+          {devMode && (
+            <button className={`sidebar__link ${view === 'dev' ? 'sidebar__link--active' : ''}`} onClick={() => setView('dev')}>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></svg>
+              Dev Tools
+            </button>
+          )}
         </nav>
       </div>
 
@@ -59,7 +70,7 @@ export default function Sidebar({
         )}
 
         <ul className="sidebar__playlist-list">
-          {playlists.map((p) => (
+          {userPlaylists.map((p) => (
             <li key={p.id}>
               <button className="sidebar__playlist-item" onClick={() => onOpenPlaylist(p.id)}>
                 {p.name}
@@ -68,6 +79,24 @@ export default function Sidebar({
             </li>
           ))}
         </ul>
+
+        {wrappedPlaylists.length > 0 && (
+          <>
+            <div className="sidebar__section-header" style={{ marginTop: '.5rem' }}>
+              <span>Wrapped</span>
+            </div>
+            <ul className="sidebar__playlist-list">
+              {wrappedPlaylists.map((p) => (
+                <li key={p.id}>
+                  <button className="sidebar__playlist-item" onClick={() => onOpenPlaylist(p.id)}>
+                    {p.name}
+                    <span className="sidebar__playlist-count">{p.song_count}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </div>
 
       <div className="sidebar__bottom">
