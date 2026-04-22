@@ -64,6 +64,10 @@ export async function uploadCover(songId, coverFile) {
   return request('POST', `/songs/${songId}/cover`, { body: form, isFormData: true });
 }
 
+export async function deleteCoverFile(filename) {
+  return request('DELETE', `/covers/file/${encodeURIComponent(filename)}`);
+}
+
 // ---- Artists ----
 
 export async function getArtists() {
@@ -140,14 +144,53 @@ export async function getWrappedAnalytics(year) {
   return request('GET', `/analytics/wrapped?year=${year}`);
 }
 
-// ---- Lyrics ----
+// ---- Lyrics (multi-set) ----
 
-export async function getLyrics(songId) {
+export async function getLyricSets(songId) {
   return request('GET', `/lyrics/${songId}`);
 }
 
-export async function saveLyrics(songId, lrcText) {
-  return request('POST', `/lyrics/${songId}`, { body: { lyrics: lrcText } });
+export async function getLyricSetText(songId, setId) {
+  return request('GET', `/lyrics/${songId}/${setId}`);
+}
+
+export async function createLyricSet(songId, label, lyrics, autoSyncFrom = null) {
+  const body = { label, lyrics };
+  if (autoSyncFrom) body.auto_sync_from = autoSyncFrom;
+  return request('POST', `/lyrics/${songId}`, { body });
+}
+
+export async function updateLyricSet(songId, setId, { lyrics, label } = {}) {
+  const body = {};
+  if (lyrics !== undefined) body.lyrics = lyrics;
+  if (label !== undefined) body.label = label;
+  return request('PUT', `/lyrics/${songId}/${setId}`, { body });
+}
+
+export async function deleteLyricSet(songId, setId) {
+  return request('DELETE', `/lyrics/${songId}/${setId}`);
+}
+
+export async function getSetColors(songId, setId) {
+  return request('GET', `/lyrics/${songId}/${setId}/colors`);
+}
+
+export async function saveSetColors(songId, setId, colorMap) {
+  return request('PUT', `/lyrics/${songId}/${setId}/colors`, { body: colorMap });
+}
+
+export async function getLegend(songId) {
+  return request('GET', `/lyrics/${songId}/legend`);
+}
+
+export async function saveLegend(songId, legend) {
+  return request('PUT', `/lyrics/${songId}/legend`, { body: legend });
+}
+
+// ---- Download flag ----
+
+export async function toggleDownload(songId, downloaded) {
+  return request('PUT', `/songs/${songId}/download`, { body: { downloaded } });
 }
 
 // ---- Wrapped ----

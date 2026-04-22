@@ -63,12 +63,13 @@ export default function Home({ songs, analytics, playlists, artists, onPlay, onR
         {recentlyPlayed.length === 0 && <p className="muted">No plays yet</p>}
         <div className="card-row">
           {recentlyPlayed.map((s) => (
-            <button key={s.id} className="card" onClick={() => onPlay(s)}>
+            <button key={s.id} className={`card ${!s.downloaded ? 'card--not-downloaded' : ''}`} onClick={() => onPlay(s)}>
               <div className="card__img">
                 {s.cover_url ? <img src={`/api${s.cover_url}${iv}`} alt="" /> : <div className="card__img-blank">♪</div>}
               </div>
               <div className="card__title">{s.title}</div>
               <div className="card__sub">{s.artist || 'Unknown'}</div>
+              {!s.downloaded && <div className="card__dl-status">Not Downloaded</div>}
             </button>
           ))}
         </div>
@@ -145,15 +146,19 @@ export default function Home({ songs, analytics, playlists, artists, onPlay, onR
         <section>
           <h3>Recommended</h3>
           <div className="card-row">
-            {recommendations.map((r) => (
-              <button key={r.id} className="card" onClick={() => { const s = songs.find(x => x.id === r.id); if (s) onPlay(s); }}>
-                <div className="card__img">
-                  {r.cover_url ? <img src={`/api${r.cover_url}${iv}`} alt="" /> : <div className="card__img-blank">★</div>}
-                </div>
-                <div className="card__title">{r.title}</div>
-                <div className="card__sub">{r.artist || 'Unknown'}</div>
-              </button>
-            ))}
+            {recommendations.map((r) => {
+              const full = songs.find(x => x.id === r.id);
+              return (
+                <button key={r.id} className={`card ${full && !full.downloaded ? 'card--not-downloaded' : ''}`} onClick={() => { if (full) onPlay(full); }}>
+                  <div className="card__img">
+                    {r.cover_url ? <img src={`/api${r.cover_url}${iv}`} alt="" /> : <div className="card__img-blank">★</div>}
+                  </div>
+                  <div className="card__title">{r.title}</div>
+                  <div className="card__sub">{r.artist || 'Unknown'}</div>
+                  {full && !full.downloaded && <div className="card__dl-status">Not Downloaded</div>}
+                </button>
+              );
+            })}
           </div>
         </section>
       )}

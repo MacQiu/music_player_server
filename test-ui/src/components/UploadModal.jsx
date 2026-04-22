@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo } from 'react';
-import { uploadSong } from '../api/client';
+import { uploadSong, deleteCoverFile } from '../api/client';
 
 export default function UploadModal({ onClose, onUploaded, songs = [] }) {
   const [file, setFile] = useState(null);
@@ -41,6 +41,18 @@ export default function UploadModal({ onClose, onUploaded, songs = [] }) {
       setCover(file);
       setCoverPreview(URL.createObjectURL(blob));
       setShowExisting(false);
+    } catch { /* ignore */ }
+  };
+
+  const handleDeleteCover = async (e, song) => {
+    e.stopPropagation();
+    const coverPath = song.cover_url;
+    const filename = coverPath.split('/').pop();
+    if (!filename) return;
+    if (!window.confirm('Delete this cover from the library? All songs using it will lose their cover.')) return;
+    try {
+      await deleteCoverFile(filename);
+      onUploaded();
     } catch { /* ignore */ }
   };
 
@@ -102,7 +114,7 @@ export default function UploadModal({ onClose, onUploaded, songs = [] }) {
               {existingCovers.length > 0 && (
                 <button type="button" className="upload-modal__pick-link"
                   onClick={() => setShowExisting(v => !v)}>
-                  {showExisting ? 'hide library covers' : 'or choose from library'}
+                  {showExisting ? 'Hide Library' : 'Show Library'}
                 </button>
               )}
             </div>
@@ -116,10 +128,16 @@ export default function UploadModal({ onClose, onUploaded, songs = [] }) {
           {showExisting && (
             <div className="upload-modal__existing">
               {existingCovers.map(s => (
-                <button key={s.id} type="button" className="upload-modal__existing-thumb"
-                  onClick={() => handlePickExisting(s)} title={`${s.title} — ${s.artist || 'Unknown'}`}>
-                  <img src={`/api${s.cover_url}`} alt="" />
-                </button>
+                <div key={s.id} className="upload-modal__existing-wrap">
+                  <button type="button" className="upload-modal__existing-thumb"
+                    onClick={() => handlePickExisting(s)} title={`${s.title} — ${s.artist || 'Unknown'}`}>
+                    <img src={`/api${s.cover_url}`} alt="" />
+                  </button>
+                  <button type="button" className="upload-modal__cover-del"
+                    onClick={(e) => handleDeleteCover(e, s)} title="Delete cover">
+                    &times;
+                  </button>
+                </div>
               ))}
             </div>
           )}

@@ -12,6 +12,8 @@ Listens on http://0.0.0.0:5000
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import random
@@ -44,16 +46,20 @@ def _allowed_image(filename: str) -> bool:
     return os.path.splitext(filename)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
 
 
-def _save_cover(file_storage, song_id: str) -> str | None:
-    """Save an uploaded cover image and return its relative path."""
+def _save_cover(file_storage, song_id: str = "") -> str | None:
+    """Save an uploaded cover image using content-hash naming for dedup."""
     if not file_storage or not file_storage.filename:
         return None
     if not _allowed_image(file_storage.filename):
         return None
     ext = os.path.splitext(file_storage.filename)[1].lower()
-    fname = f"{song_id}{ext}"
+    data = file_storage.read()
+    digest = hashlib.sha256(data).hexdigest()
+    fname = f"{digest}{ext}"
     abs_path = os.path.join(COVERS_DIR, fname)
-    file_storage.save(abs_path)
+    if not os.path.isfile(abs_path):
+        with open(abs_path, "wb") as out:
+            out.write(data)
     return os.path.relpath(abs_path, BASE_DIR).replace("\\", "/")
 
 
@@ -112,7 +118,7 @@ def create_app() -> Flask:
     def list_songs():
         with db.get_conn() as conn:
             rows = conn.execute(
-                "SELECT id, title, artist, album, duration, file_path, cover_path, sort_order, date_added "
+                "SELECT id, title, artist, album, duration, file_path, cover_path, sort_order, date_added, downloaded "
                 "FROM songs ORDER BY sort_order ASC, date_added DESC"
             ).fetchall()
         result = []
@@ -146,9 +152,11 @@ def create_app() -> Flask:
             return jsonify({"error": "only .mp3 and .wav are allowed"}), 400
 
         song_id = utils.new_id()
-        stored_name = utils.safe_storage_name(f.filename, song_id)
-        abs_path = os.path.join(SONGS_DIR, stored_name)
-        f.save(abs_path)
+
+        ext = os.path.splitext(f.filename)[1].lower()
+        tmp_name = f"_tmp_{song_id}{ext}"
+        tmp_path = os.path.join(SONGS_DIR, tmp_name)
+        f.save(tmp_path)
 
         form_title = (request.form.get("title") or "").strip() or None
         form_artist = (request.form.get("artist") or "").strip() or None
@@ -159,12 +167,16 @@ def create_app() -> Flask:
         except ValueError:
             form_duration_val = None
 
-        mt_title, mt_artist, mt_album, mt_duration = utils.extract_metadata(abs_path)
+        mt_title, mt_artist, mt_album, mt_duration = utils.extract_metadata(tmp_path)
 
         title = form_title or mt_title or os.path.splitext(os.path.basename(f.filename))[0]
         artist = form_artist or mt_artist
         album = form_album or mt_album
         duration = form_duration_val if form_duration_val is not None else mt_duration
+
+        stored_name = utils.safe_storage_name(title, artist, ext, SONGS_DIR)
+        abs_path = os.path.join(SONGS_DIR, stored_name)
+        os.replace(tmp_path, abs_path)
 
         cover_path = _save_cover(request.files.get("cover"), song_id)
 
@@ -250,6 +262,23 @@ def create_app() -> Flask:
         with db.get_conn() as conn:
             conn.execute("UPDATE songs SET cover_path = ? WHERE id = ?", (cover_path, song_id))
         return jsonify({"ok": True, "cover_url": f"/covers/{song_id}"})
+
+    @app.delete("/covers/file/<filename>")
+    def delete_cover_file(filename: str):
+        cover_rel = f"storage/covers/{filename}"
+        abs_path = os.path.join(BASE_DIR, cover_rel)
+        if not os.path.isfile(abs_path):
+            return jsonify({"error": "cover file not found"}), 404
+        with db.get_conn() as conn:
+            conn.execute(
+                "UPDATE songs SET cover_path = NULL WHERE cover_path = ?",
+                (cover_rel,),
+            )
+        try:
+            os.remove(abs_path)
+        except OSError:
+            pass
+        return jsonify({"ok": True})
 
     # =====================================================================
     #  Artists
@@ -709,43 +738,284 @@ def create_app() -> Flask:
             if not row:
                 return jsonify({"error": "song not found"}), 404
 
+            cover_ref_count = 0
+            if row["cover_path"]:
+                cover_ref_count = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM songs WHERE cover_path = ? AND id != ?",
+                    (row["cover_path"], song_id),
+                ).fetchone()["cnt"]
+
             conn.execute("DELETE FROM playlogs WHERE song_id = ?", (song_id,))
             conn.execute("DELETE FROM playlist_songs WHERE song_id = ?", (song_id,))
             conn.execute("DELETE FROM songs WHERE id = ?", (song_id,))
 
-        for rel in (row["file_path"], row["cover_path"]):
-            if not rel:
-                continue
-            abs_path = os.path.join(BASE_DIR, rel)
+        if row["file_path"]:
+            abs_path = os.path.join(BASE_DIR, row["file_path"])
             try:
                 if os.path.isfile(abs_path):
                     os.remove(abs_path)
             except OSError as e:
                 app.logger.warning("Could not delete file %s: %s", abs_path, e)
 
+        if row["cover_path"] and cover_ref_count == 0:
+            abs_path = os.path.join(BASE_DIR, row["cover_path"])
+            try:
+                if os.path.isfile(abs_path):
+                    os.remove(abs_path)
+            except OSError as e:
+                app.logger.warning("Could not delete cover %s: %s", abs_path, e)
+
         return jsonify({"ok": True, "id": song_id})
 
     # =====================================================================
-    #  Lyrics
+    #  Lyrics (multi-set)
     # =====================================================================
 
+    def _lyrics_dir(song_id: str) -> str:
+        """Return the human-readable lyrics directory for a song."""
+        with db.get_conn() as conn:
+            row = conn.execute(
+                "SELECT title, artist FROM songs WHERE id = ?", (song_id,)
+            ).fetchone()
+        if row:
+            base = row["title"]
+            if row["artist"]:
+                base = f"{row['title']} - {row['artist']}"
+            safe = re.sub(r'[<>:"/\\|?*]', "_", base).strip().rstrip(".")
+            name = safe or song_id
+        else:
+            name = song_id
+        d = os.path.join(LYRICS_DIR, name)
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def _lyrics_filename(label: str) -> str:
+        """Return sanitized LRC filename from a set label."""
+        safe = re.sub(r'[<>:"/\\|?*]', "_", label).strip().rstrip(".")
+        return f"Lyrics - {safe or 'default'}.lrc"
+
+    def _colors_filename(label: str) -> str:
+        """Return sanitized colors-map filename from a set label."""
+        safe = re.sub(r'[<>:"/\\|?*]', "_", label).strip().rstrip(".")
+        return f"Lyrics - {safe or 'default'}.colors.json"
+
+    def _parse_lrc_timestamps(text: str):
+        """Extract (time_seconds, raw_text) tuples from LRC text."""
+        import re as _re
+        result = []
+        for line in text.split("\n"):
+            m = _re.match(r"^\[(\d{2}):(\d{2})\.(\d{2,3})\]\s?(.*)", line)
+            if m:
+                mins = int(m.group(1))
+                secs = int(m.group(2))
+                ms = int(m.group(3).ljust(3, "0"))
+                result.append((mins * 60 + secs + ms / 1000, m.group(4)))
+            elif line.strip():
+                result.append((None, line.strip()))
+        return result
+
+    def _fmt_ts(seconds: float) -> str:
+        m = int(seconds // 60)
+        s = int(seconds % 60)
+        cs = int((seconds % 1) * 100)
+        return f"{m:02d}:{s:02d}.{cs:02d}"
+
     @app.get("/lyrics/<song_id>")
-    def lyrics(song_id: str):
-        path = os.path.join(LYRICS_DIR, f"{song_id}.lrc")
-        if not os.path.isfile(path):
-            return jsonify({"error": "lyrics not found"}), 404
-        with open(path, "r", encoding="utf-8") as fh:
-            text = fh.read()
-        return jsonify({"song_id": song_id, "lyrics": text})
+    def list_lyric_sets(song_id: str):
+        with db.get_conn() as conn:
+            rows = conn.execute(
+                "SELECT id, label, position FROM lyric_sets WHERE song_id = ? ORDER BY position",
+                (song_id,),
+            ).fetchall()
+        return jsonify({"sets": [dict(r) for r in rows]})
 
     @app.post("/lyrics/<song_id>")
-    def save_lyrics(song_id: str):
+    def create_lyric_set(song_id: str):
         data = request.get_json(silent=True) or {}
+        label = (data.get("label") or "").strip() or "Lyrics"
         lrc_text = data.get("lyrics", "")
-        path = os.path.join(LYRICS_DIR, f"{song_id}.lrc")
+        auto_sync_from = data.get("auto_sync_from")
+
+        if auto_sync_from:
+            with db.get_conn() as conn:
+                src_row = conn.execute(
+                    "SELECT label FROM lyric_sets WHERE id = ? AND song_id = ?",
+                    (auto_sync_from, song_id),
+                ).fetchone()
+            if src_row:
+                src_path = os.path.join(
+                    _lyrics_dir(song_id), _lyrics_filename(src_row["label"])
+                )
+                if os.path.isfile(src_path):
+                    with open(src_path, "r", encoding="utf-8") as fh:
+                        src_parsed = _parse_lrc_timestamps(fh.read())
+                    new_lines = [l.strip() for l in lrc_text.split("\n") if l.strip()]
+                    synced = []
+                    for i, line in enumerate(new_lines):
+                        if i < len(src_parsed) and src_parsed[i][0] is not None:
+                            synced.append(f"[{_fmt_ts(src_parsed[i][0])}]{line}")
+                        else:
+                            synced.append(line)
+                    lrc_text = "\n".join(synced)
+
+        set_id = utils.new_id()
+        with db.get_conn() as conn:
+            max_pos = conn.execute(
+                "SELECT COALESCE(MAX(position), -1) FROM lyric_sets WHERE song_id = ?",
+                (song_id,),
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO lyric_sets (id, song_id, label, position) VALUES (?, ?, ?, ?)",
+                (set_id, song_id, label, max_pos + 1),
+            )
+        path = os.path.join(_lyrics_dir(song_id), _lyrics_filename(label))
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(lrc_text)
+        return jsonify({"id": set_id, "label": label}), 201
+
+    # Legend routes registered before dynamic <set_id> to avoid collision
+    @app.get("/lyrics/<song_id>/legend")
+    def get_legend(song_id: str):
+        path = os.path.join(_lyrics_dir(song_id), "legend.json")
+        if not os.path.isfile(path):
+            return jsonify({})
+        with open(path, "r", encoding="utf-8") as fh:
+            return jsonify(json.load(fh))
+
+    @app.put("/lyrics/<song_id>/legend")
+    def save_legend(song_id: str):
+        data = request.get_json(silent=True) or {}
+        path = os.path.join(_lyrics_dir(song_id), "legend.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
         return jsonify({"ok": True})
+
+    # =====================================================================
+    #  Per-set color map (line → color assignments, stored separately)
+    # =====================================================================
+
+    @app.get("/lyrics/<song_id>/<set_id>/colors")
+    def get_set_colors(song_id: str, set_id: str):
+        with db.get_conn() as conn:
+            row = conn.execute(
+                "SELECT label FROM lyric_sets WHERE id = ? AND song_id = ?",
+                (set_id, song_id),
+            ).fetchone()
+        if not row:
+            return jsonify({})
+        path = os.path.join(_lyrics_dir(song_id), _colors_filename(row["label"]))
+        if not os.path.isfile(path):
+            return jsonify({})
+        with open(path, "r", encoding="utf-8") as fh:
+            return jsonify(json.load(fh))
+
+    @app.put("/lyrics/<song_id>/<set_id>/colors")
+    def save_set_colors(song_id: str, set_id: str):
+        data = request.get_json(silent=True) or {}
+        with db.get_conn() as conn:
+            row = conn.execute(
+                "SELECT label FROM lyric_sets WHERE id = ? AND song_id = ?",
+                (set_id, song_id),
+            ).fetchone()
+        if not row:
+            return jsonify({"error": "set not found"}), 404
+        path = os.path.join(_lyrics_dir(song_id), _colors_filename(row["label"]))
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        return jsonify({"ok": True})
+
+    @app.get("/lyrics/<song_id>/<set_id>")
+    def get_lyric_set(song_id: str, set_id: str):
+        with db.get_conn() as conn:
+            row = conn.execute(
+                "SELECT label FROM lyric_sets WHERE id = ? AND song_id = ?",
+                (set_id, song_id),
+            ).fetchone()
+        if not row:
+            return jsonify({"error": "lyric set not found"}), 404
+        path = os.path.join(_lyrics_dir(song_id), _lyrics_filename(row["label"]))
+        if not os.path.isfile(path):
+            return jsonify({"error": "lyric set not found"}), 404
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        return jsonify({"song_id": song_id, "set_id": set_id, "lyrics": text})
+
+    @app.put("/lyrics/<song_id>/<set_id>")
+    def update_lyric_set(song_id: str, set_id: str):
+        data = request.get_json(silent=True) or {}
+        lrc_text = data.get("lyrics")
+        new_label = data.get("label")
+
+        with db.get_conn() as conn:
+            row = conn.execute(
+                "SELECT label FROM lyric_sets WHERE id = ? AND song_id = ?",
+                (set_id, song_id),
+            ).fetchone()
+        if not row:
+            return jsonify({"error": "lyric set not found"}), 404
+        old_label = row["label"]
+        song_dir = _lyrics_dir(song_id)
+
+        if new_label is not None and new_label.strip() != old_label:
+            old_path = os.path.join(song_dir, _lyrics_filename(old_label))
+            new_path = os.path.join(song_dir, _lyrics_filename(new_label.strip()))
+            if os.path.isfile(old_path):
+                os.replace(old_path, new_path)
+            old_colors = os.path.join(song_dir, _colors_filename(old_label))
+            new_colors = os.path.join(song_dir, _colors_filename(new_label.strip()))
+            if os.path.isfile(old_colors):
+                os.replace(old_colors, new_colors)
+            with db.get_conn() as conn:
+                conn.execute(
+                    "UPDATE lyric_sets SET label = ? WHERE id = ? AND song_id = ?",
+                    (new_label.strip(), set_id, song_id),
+                )
+            old_label = new_label.strip()
+
+        if lrc_text is not None:
+            path = os.path.join(song_dir, _lyrics_filename(old_label))
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(lrc_text)
+
+        return jsonify({"ok": True})
+
+    @app.delete("/lyrics/<song_id>/<set_id>")
+    def delete_lyric_set(song_id: str, set_id: str):
+        with db.get_conn() as conn:
+            row = conn.execute(
+                "SELECT label FROM lyric_sets WHERE id = ? AND song_id = ?",
+                (set_id, song_id),
+            ).fetchone()
+        if row:
+            song_dir = _lyrics_dir(song_id)
+            for fn in (_lyrics_filename(row["label"]), _colors_filename(row["label"])):
+                try:
+                    fp = os.path.join(song_dir, fn)
+                    if os.path.isfile(fp):
+                        os.remove(fp)
+                except OSError:
+                    pass
+        with db.get_conn() as conn:
+            conn.execute(
+                "DELETE FROM lyric_sets WHERE id = ? AND song_id = ?",
+                (set_id, song_id),
+            )
+        return jsonify({"ok": True})
+
+    # =====================================================================
+    #  Download flag
+    # =====================================================================
+
+    @app.put("/songs/<song_id>/download")
+    def toggle_download(song_id: str):
+        data = request.get_json(silent=True) or {}
+        downloaded = 1 if data.get("downloaded") else 0
+        with db.get_conn() as conn:
+            conn.execute(
+                "UPDATE songs SET downloaded = ? WHERE id = ?",
+                (downloaded, song_id),
+            )
+        return jsonify({"ok": True, "downloaded": downloaded})
 
     # =====================================================================
     #  Wrapped playlist generation

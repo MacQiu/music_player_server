@@ -22,13 +22,20 @@ requirements.txt
 data/
   music.db          # created on first run
 storage/
-  songs/            # uploaded audio files
-  covers/           # song cover images
+  songs/            # uploaded audio files (Title - Artist.ext naming)
+  covers/           # song cover images (content-hash naming for dedup)
   artists/          # artist profile images
-  lyrics/           # optional <song_id>.lrc files
+  lyrics/           # per-song directories with lyric sets and color maps
+    Shut Down - BLACKPINK/
+      Lyrics - Original.lrc
+      Lyrics - Original.colors.json
+      Lyrics - Romanized.lrc
+      legend.json
 test-ui/            # Vite + React SPA
   src/
     api/client.js   # API client wrapper
+    constants/
+      colors.js     # Singer color palette (15 colors)
     components/     # DesktopLayout, Sidebar, DesktopPlayer, Player,
                     # UploadModal, ServerModal, QueueSidebar, LyricsOverlay,
                     # LyricsEditor, MobilePlayerOverlay, MobileQueueOverlay,
@@ -64,18 +71,19 @@ Server listens on `http://0.0.0.0:5000`. From another device on the same WiFi,
 use your machine's LAN IP (e.g. `http://192.168.1.42:5000`).
 
 The React dev server runs on `http://localhost:3000` and proxies `/api/*` to
-Flask.
+Flask. To access from a phone on the same network, run `npm run dev -- --host`.
 
 ---
 
 ## Data Model
 
-- `songs(id, title, artist, album, duration, file_path, cover_path, date_added, sort_order)`
+- `songs(id, title, artist, album, duration, file_path, cover_path, date_added, sort_order, downloaded)`
 - `analytics(song_id PK, play_count, total_time, last_played)`
 - `playlogs(id PK, song_id, duration, timestamp, received_at)`
 - `playlists(id PK, name, created_at)`
 - `playlist_songs(playlist_id, song_id, position)` -- composite PK, FK cascade
 - `artists(name PK, image_path, created_at)`
+- `lyric_sets(id PK, song_id, label, position)` -- FK cascade on songs
 
 Idempotency: `playlogs.id` is a UUID the client generates when a play
 happens. If the same ID arrives twice the second insert is ignored and
@@ -92,10 +100,10 @@ All responses are JSON. Errors look like `{"error": "..."}`.
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/ping` | Health check + UTC time |
-| `GET` | `/songs` | List all songs (ordered by `sort_order`, then newest first; includes `cover_url`) |
+| `GET` | `/songs` | List all songs (ordered by `sort_order`, then newest first; includes `cover_url` and `downloaded` flag) |
 | `POST` | `/upload` | Multipart upload: `file` (required), `cover` (optional image), `title`, `artist`, `album`, `duration` |
 | `GET` | `/download/<song_id>` | Stream audio file |
-| `DELETE` | `/songs/<song_id>` | Delete song, analytics, cover, and audio file |
+| `DELETE` | `/songs/<song_id>` | Delete song, analytics, cover (if not shared), and audio file |
 | `PUT` | `/songs/order` | Reorder library: `{"song_ids": ["id1", "id2", ...]}` |
 
 ### Cover Images
@@ -104,6 +112,7 @@ All responses are JSON. Errors look like `{"error": "..."}`.
 |--------|------|-------------|
 | `GET` | `/covers/<song_id>` | Serve cover image |
 | `POST` | `/songs/<song_id>/cover` | Upload/replace cover image (`cover` file field) |
+| `DELETE` | `/covers/file/<filename>` | Delete a cover file from the library and unlink it from all songs |
 
 ### Artists
 
@@ -140,12 +149,25 @@ All responses are JSON. Errors look like `{"error": "..."}`.
 | `GET` | `/analytics` | Top songs, top artists, totals, 5 random recommendations from top 15, 30-day play history |
 | `GET` | `/analytics/wrapped?year=YYYY` | Yearly stats (Dec 1 of year-1 to Nov 30 of year): top songs, top artists, total plays and time |
 
-### Lyrics
+### Lyrics (Multi-Set)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/lyrics/<song_id>` | Return `.lrc` file contents if available |
-| `POST` | `/lyrics/<song_id>` | Save/update lyrics `{"lyrics": "[00:01.00]line..."}` |
+| `GET` | `/lyrics/<song_id>` | List all lyric sets for a song: `{ sets: [{ id, label, position }] }` |
+| `POST` | `/lyrics/<song_id>` | Create a new lyric set: `{ label, lyrics, auto_sync_from? }` |
+| `GET` | `/lyrics/<song_id>/<set_id>` | Get LRC text for a specific lyric set |
+| `PUT` | `/lyrics/<song_id>/<set_id>` | Update lyrics text and/or label |
+| `DELETE` | `/lyrics/<song_id>/<set_id>` | Delete a lyric set |
+| `GET` | `/lyrics/<song_id>/legend` | Get color-to-singer legend JSON |
+| `PUT` | `/lyrics/<song_id>/legend` | Save legend: `{ "red": "Jisoo", "blue": "Jennie" }` |
+| `GET` | `/lyrics/<song_id>/<set_id>/colors` | Get per-line color map for a lyric set |
+| `PUT` | `/lyrics/<song_id>/<set_id>/colors` | Save per-line color map |
+
+### Download Flag
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `PUT` | `/songs/<song_id>/download` | Toggle download status: `{ "downloaded": true/false }` |
 
 ### Wrapped Playlists
 
@@ -185,11 +207,13 @@ All responses are JSON. Errors look like `{"error": "..."}`.
   next (remaining songs in source list). Tap to jump, drag to reorder manual
   queue, remove from manual queue.
 - **Lyrics overlay**: replaces main content with synced lyrics that auto-scroll
-  and highlight as the song plays. Includes a lyrics editor for line-level
-  timestamping with the ability to edit/delete individual timestamps and save
-  partially timestamped songs.
+  and highlight as the song plays. Supports multiple lyric sets (e.g. Original,
+  Romanized, Translated) with a tab bar to switch between them. Color-coded
+  singer highlighting with a toggleable legend sidebar. Includes a lyrics
+  editor with line-level timestamping, color assignment, and set management.
 - **Upload modal**: audio file + cover image upload with preview. Includes a
   picker to select from existing cover images to avoid re-uploading duplicates.
+  Covers can be deleted from the library via a delete button on each thumbnail.
 - **Server modal**: server status, sync, fetch, analytics refresh
 - **Playlist overlay**: modal dialog with playlist header (cover, editable name,
   track count, duration), Play All/Add Songs/Delete buttons, song list with
@@ -209,11 +233,13 @@ All responses are JSON. Errors look like `{"error": "..."}`.
 
 - **Home tab**: recently played, artists (tap no-image artists to upload),
   playlists split into user playlists and Wrapped playlists (tap to open
-  playlist overlay), recommendations (random 5 from top 15 most played)
+  playlist overlay), recommendations (random 5 from top 15 most played).
+  Non-downloaded songs appear greyed out with "Not Downloaded" label.
 - **Library tab**: search bar, sort pills (Title, Artist, Duration) with
   ascending/descending toggles, Reorder mode with up/down arrow buttons for
   manual library reordering, song list with "..." menu for play/queue/set
-  cover/add to playlist
+  cover/download toggle/add to playlist. Non-downloaded songs are dimmed
+  with a "Not Downloaded" subtitle.
 - **Analytics tab**: stat cards + recharts charts + yearly wrapped section
 - **Sync tab**: card rows for server status, sync status, fetch songs
 - **Mini player bar**: tappable, shows cover + title + play/pause + progress
@@ -224,8 +250,8 @@ All responses are JSON. Errors look like `{"error": "..."}`.
 - **Queue overlay**: same section layout as desktop queue
 - **Playlist overlay**: full-screen overlay with same functionality as desktop;
   wrapped playlists are read-only with per-song stats
-- **Lyrics overlay (mobile)**: read-only synced lyrics display accessible from
-  the full-screen player; no editing capability on mobile
+- **Lyrics overlay (mobile)**: read-only synced lyrics display with set
+  switching and color rendering; no editing capability on mobile
 
 ## Shared Audio Architecture
 
@@ -261,6 +287,65 @@ On mobile, toggle "Reorder" mode and use up/down arrows. Changes persist to
 the backend via `PUT /songs/order`. Column sorting (title, artist, album,
 duration) with ascending/descending toggles is also available.
 
+## File Naming
+
+- **Song audio files**: stored as `Title - Artist.ext` (e.g. `Shut Down - BLACKPINK.mp3`).
+  Falls back to `Title.ext` if no artist. Collisions are resolved by appending
+  ` (2)`, ` (3)`, etc.
+- **Cover images**: stored using a SHA-256 content hash as the filename
+  (e.g. `a1b2c3...d4.jpg`). Identical images point to the same file on disk.
+  Covers are only deleted from disk when explicitly removed via the cover
+  library in the upload modal, and only if no songs still reference them.
+- **Lyrics directories**: stored as `Title - Artist/` under `storage/lyrics/`.
+  Each lyric set is a file named `Lyrics - {label}.lrc`. Color maps are stored
+  as `Lyrics - {label}.colors.json` alongside their LRC file.
+
+## Multi-Set Lyrics
+
+Songs can have multiple sets of lyrics (e.g. Original, Romanized, Translated).
+Each set is stored as its own `.lrc` file within the song's lyrics directory.
+The `lyric_sets` table tracks metadata (id, song_id, label, position).
+
+- **Set switching**: both the overlay and editor have a tab bar to switch sets
+- **Auto-sync timestamps**: when creating a new set, timestamps from the primary
+  set (position 0) can be auto-applied line-by-line to the new set
+- **Independent editing**: after creation, each set's timestamps are independent
+
+## Color-Coded Lyrics (Singer Assignment)
+
+Colors are assigned per-line (or per character range within a line) and stored
+in a separate `.colors.json` file alongside the LRC, keeping the lyrics text
+clean. This supports color-coding lines to identify which group member is
+singing.
+
+**15-color palette**: red, maroon, orange, yellow, lime green, forest green,
+teal, cyan, blue, navy blue, magenta, purple, violet, peach, light grey.
+Default (unassigned) text is white when active and dim grey when upcoming.
+
+**Color map format** (stored in `colors.json`):
+- Whole line: `{ "0": "magenta" }` (line index → color name)
+- Partial line: `{ "1": [{"s": 0, "e": 10, "c": "red"}, {"s": 10, "e": 25, "c": "blue"}] }`
+
+**Legend**: a per-song color-to-singer-name mapping (`legend.json`) that can be
+toggled on as a sidebar panel in the lyrics overlay.
+
+**Editor workflow**:
+1. Click the palette icon on any line
+2. Pick a color, then "Color Whole Line" or select a portion and "Apply to Selection"
+3. Set up the legend via the "Legend" button to map colors to singer names
+4. Save -- lyrics and colors are saved to separate files
+
+## Selective Download (Mobile)
+
+All songs from the server appear in the mobile library regardless of download
+status. Songs can be marked as "downloaded" or "not downloaded" via the context
+menu. Non-downloaded songs are greyed out with a "Not Downloaded" subtitle but
+can still be played (streaming from server), added to playlists, and reordered.
+
+This is a server-side flag (`downloaded` column in `songs` table) designed as
+scaffolding for a future native iOS app or Jellyfin integration, where the flag
+will determine which songs to cache locally on the device.
+
 ## Yearly Analytics (Wrapped)
 
 The `GET /analytics/wrapped?year=YYYY` endpoint returns stats for a
@@ -289,15 +374,6 @@ Hidden developer mode (desktop only) activated with `Ctrl+Shift+D`. Provides:
 
 These features are not accessible from the standard desktop UI.
 
-## Lyrics
-
-Songs can have `.lrc` format lyrics stored server-side. The desktop lyrics
-overlay shows synced lyrics that auto-scroll and highlight line-by-line as
-the song plays. Colors transition from navy blue (upcoming) to white (active/
-past). The built-in editor supports tap-to-timestamp, editing/deleting
-individual timestamps, and saving partially timestamped songs. Mobile shows
-a read-only lyrics overlay.
-
 ## Repeat Modes (both UIs)
 
 Cycle: no repeat -> repeat playlist -> repeat individual song
@@ -323,3 +399,5 @@ orange repeat-one style).
 - Artist images can be uploaded by clicking/tapping an artist card that has
   no image yet, or via the artist overlay.
 - Image containers are sized for high-resolution display across both UIs.
+- Database migrations run automatically on startup (cover dedup, sort_order
+  backfill, artist backfill, lyrics directory restructuring, download column).

@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo, useCallback } from 'react';
-import { uploadCover, addSongToPlaylist, reorderLibrary } from '../api/client';
+import { uploadCover, addSongToPlaylist, reorderLibrary, toggleDownload } from '../api/client';
 
 function sortSongs(list, field, dir) {
   const cmp = (a, b) => {
@@ -88,6 +88,11 @@ export default function Library({ songs, onPlay, addToQueue, playlists, refreshS
     setShowPlaylistSub(null);
   };
 
+  const handleToggleDownload = async (songId, current) => {
+    try { await toggleDownload(songId, !current); refreshSongs?.(); } catch { /* ignore */ }
+    setMenuIdx(null);
+  };
+
   const canReorder = reorderMode && !isSearching && !isSorting;
 
   return (
@@ -115,7 +120,7 @@ export default function Library({ songs, onPlay, addToQueue, playlists, refreshS
       {filtered.length === 0 && <p className="muted">No songs found</p>}
       <ul className="song-list">
         {filtered.map((song, idx) => (
-          <li key={song.id} className="song-item" onClick={() => !canReorder && onPlay(song)}>
+          <li key={song.id} className={`song-item ${!song.downloaded ? 'song-item--not-downloaded' : ''}`} onClick={() => !canReorder && onPlay(song)}>
             {canReorder && (
               <div className="song-item__reorder">
                 <button className="song-item__reorder-btn" onClick={(e) => { e.stopPropagation(); moveItem(idx, idx - 1); }}
@@ -134,6 +139,7 @@ export default function Library({ songs, onPlay, addToQueue, playlists, refreshS
             <div className="song-item__info">
               <strong>{song.title}</strong>
               <span>{song.artist || 'Unknown Artist'}</span>
+              {!song.downloaded && <span className="song-item__not-downloaded">Not Downloaded</span>}
             </div>
             {!canReorder && (
               <div className="song-item__actions">
@@ -145,6 +151,9 @@ export default function Library({ songs, onPlay, addToQueue, playlists, refreshS
                     <button onClick={() => { onPlay(song); setMenuIdx(null); }}>Play Now</button>
                     <button onClick={() => { addToQueue(song); setMenuIdx(null); }}>Add to Queue</button>
                     <button onClick={() => handleSetCover(song.id)}>Set Cover</button>
+                    <button onClick={() => handleToggleDownload(song.id, song.downloaded)}>
+                      {song.downloaded ? 'Remove Download' : 'Download'}
+                    </button>
                     {playlists && playlists.length > 0 && (
                       <>
                         <button onClick={() => setShowPlaylistSub(showPlaylistSub ? null : song.id)}>
