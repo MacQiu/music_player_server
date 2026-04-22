@@ -1,0 +1,478 @@
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, TextInput, StyleSheet, FlatList } from 'react-native';
+import { useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { usePlayer } from '../contexts/PlayerContext';
+import {
+  getLyricSets, getLyricSetText, getLegend, getSetColors,
+  createLyricSet, updateLyricSet, deleteLyricSet,
+  saveLegend, saveSetColors,
+} from '../api/client';
+import { SINGER_COLORS, COLOR_NAMES } from '../constants/colors';
+import { Colors, Spacing, FontSize, Radius } from '../constants/theme';
+
+function parseLrc(text: string) {
+  const lines = text.split('\n');
+  const result: { time: number | null; text: string }[] = [];
+  let hasTimes = false;
+  for (const line of lines) {
+    const m = line.match(/^\[(\d{2}):(\d{2})\.(\d{2,3})\]\s?(.*)/);
+    if (m) {
+      const mins = parseInt(m[1], 10);
+      const secs = parseInt(m[2], 10);
+      const ms = parseInt(m[3].padEnd(3, '0'), 10);
+      const raw = m[4].replace(/<[a-z ]+>(.*?)<\/[a-z ]+>/g, '$1');
+      result.push({ time: mins * 60 + secs + ms / 1000, text: raw });
+      hasTimes = true;
+    } else if (line.trim()) {
+      const raw = line.trim().replace(/<[a-z ]+>(.*?)<\/[a-z ]+>/g, '$1');
+      result.push({ time: null, text: raw });
+    }
+  }
+  return { lines: result, hasTimes };
+}
+
+function buildColoredSegments(text: string, colorEntry: any) {
+  if (!colorEntry) return [{ text, color: null }];
+  if (typeof colorEntry === 'string') return [{ text, color: colorEntry }];
+  if (!Array.isArray(colorEntry) || colorEntry.length === 0) return [{ text, color: null }];
+  const segments: { text: string; color: string | null }[] = [];
+  let lastEnd = 0;
+  const sorted = [...colorEntry].sort((a: any, b: any) => a.s - b.s);
+  for (const { s, e, c } of sorted) {
+    if (s > lastEnd) segments.push({ text: text.slice(lastEnd, s), color: null });
+    segments.push({ text: text.slice(s, Math.min(e, text.length)), color: c });
+    lastEnd = Math.min(e, text.length);
+  }
+  if (lastEnd < text.length) segments.push({ text: text.slice(lastEnd), color: null });
+  return segments;
+}
+
+function getSegmentColor(colorName: string | null, state: string) {
+  if (!colorName) {
+    if (state === 'active') return '#ffffff';
+    if (state === 'past') return 'rgba(255,255,255,0.7)';
+    return '#666';
+  }
+  const hex = SINGER_COLORS[colorName] || '#ffffff';
+  if (state === 'active') return hex;
+  if (state === 'past') return hex + 'aa';
+  return '#666';
+}
+
+function fmtTs(seconds: number) {
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+  const ms = Math.floor((seconds % 1) * 100).toString().padStart(2, '0');
+  return `${m}:${s}.${ms}`;
+}
+
+export default function LyricsScreen() {
+  const router = useRouter();
+  const { currentSong, currentTime, seek } = usePlayer();
+  const [sets, setSets] = useState<any[]>([]);
+  const [activeSetId, setActiveSetId] = useState<string | null>(null);
+  const [rawLyrics, setRawLyrics] = useState<string | null>(null);
+  const [colorMap, setColorMap] = useState<any>({});
+  const [legend, setLegendState] = useState<any>({});
+  const [showLegend, setShowLegend] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<'view' | 'edit'>('view');
+  const [editLines, setEditLines] = useState<{ time: number | null; text: string }[]>([]);
+  const [textInput, setTextInput] = useState('');
+  const [showTextEdit, setShowTextEdit] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncIdx, setSyncIdx] = useState(-1);
+  const [saving, setSaving] = useState(false);
+  const [showNewSet, setShowNewSet] = useState(false);
+  const [newLabel, setNewLabel] = useState('');
+  const [newLyricsText, setNewLyricsText] = useState('');
+  const scrollRef = useRef<ScrollView>(null);
+
+  const song = currentSong;
+
+  const fetchSets = useCallback(() => {
+    if (!song) return;
+    setError(null);
+    getLyricSets(song.id)
+      .then(data => {
+        const s = data.sets || [];
+        setSets(s);
+        if (s.length > 0) {
+          setActiveSetId(prev => (prev && s.find((x: any) => x.id === prev)) ? prev : s[0].id);
+        } else {
+          setActiveSetId(null);
+          setRawLyrics(null);
+          setError('No lyrics available');
+        }
+      })
+      .catch(() => setError('No lyrics available'));
+    getLegend(song.id).then(setLegendState).catch(() => setLegendState({}));
+  }, [song?.id]);
+
+  useEffect(() => { fetchSets(); }, [fetchSets]);
+
+  useEffect(() => {
+    if (!activeSetId || !song) return;
+    setRawLyrics(null);
+    setColorMap({});
+    getLyricSetText(song.id, activeSetId).then(data => setRawLyrics(data.lyrics)).catch(() => setRawLyrics(null));
+    getSetColors(song.id, activeSetId).then(setColorMap).catch(() => setColorMap({}));
+  }, [activeSetId, song?.id]);
+
+  const parsed = useMemo(() => rawLyrics ? parseLrc(rawLyrics) : null, [rawLyrics]);
+
+  const activeIdx = useMemo(() => {
+    if (!parsed || !parsed.hasTimes || currentTime == null) return -1;
+    let idx = -1;
+    for (let i = 0; i < parsed.lines.length; i++) {
+      if (parsed.lines[i].time !== null && parsed.lines[i].time! <= currentTime) idx = i;
+    }
+    return idx;
+  }, [parsed, currentTime]);
+
+  const handleStamp = useCallback(() => {
+    if (!syncing || syncIdx < 0 || syncIdx >= editLines.length) return;
+    const t = currentTime;
+    setEditLines(prev => {
+      const next = [...prev];
+      next[syncIdx] = { ...next[syncIdx], time: t };
+      return next;
+    });
+    let nextIdx = -1;
+    for (let i = syncIdx + 1; i < editLines.length; i++) {
+      if (editLines[i].time === null) { nextIdx = i; break; }
+    }
+    if (nextIdx === -1) { setSyncing(false); setSyncIdx(-1); }
+    else { setSyncIdx(nextIdx); }
+  }, [syncing, syncIdx, editLines, currentTime]);
+
+  const buildLrc = () => {
+    return editLines.map(l => {
+      if (l.time !== null && l.time !== undefined) return `[${fmtTs(l.time)}]${l.text}`;
+      return l.text;
+    }).join('\n');
+  };
+
+  const handleSave = async () => {
+    if (!activeSetId || !song) return;
+    setSaving(true);
+    try {
+      await updateLyricSet(song.id, activeSetId, { lyrics: buildLrc() });
+      await saveSetColors(song.id, activeSetId, colorMap);
+      setMode('view');
+      fetchSets();
+    } catch { }
+    finally { setSaving(false); }
+  };
+
+  const handleCreateSet = async () => {
+    if (!song) return;
+    const label = newLabel.trim() || 'Lyrics';
+    const primarySet = sets.find((s: any) => s.position === 0);
+    try {
+      const result = await createLyricSet(song.id, label, newLyricsText, primarySet?.id || null);
+      setShowNewSet(false);
+      setNewLabel('');
+      setNewLyricsText('');
+      fetchSets();
+      setActiveSetId(result.id);
+    } catch { }
+  };
+
+  const handleDeleteSet = async (setId: string) => {
+    if (!song) return;
+    try {
+      await deleteLyricSet(song.id, setId);
+      if (activeSetId === setId) setActiveSetId(null);
+      fetchSets();
+    } catch { }
+  };
+
+  const startEdit = () => {
+    if (parsed) {
+      setEditLines(parsed.lines.map(l => ({ ...l })));
+      setTextInput(parsed.lines.map(l => l.text).join('\n'));
+    }
+    setMode('edit');
+  };
+
+  const applyTextEdit = () => {
+    const newTexts = textInput.split('\n').filter(l => l.trim());
+    setEditLines(prev => newTexts.map((text, i) => ({
+      text,
+      time: i < prev.length ? prev[i].time : null,
+    })));
+    setShowTextEdit(false);
+  };
+
+  if (!song) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <Text style={styles.muted}>No song playing</Text>
+      </SafeAreaView>
+    );
+  }
+
+  // New set creation view
+  if (showNewSet) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>New Lyric Set</Text>
+          <TouchableOpacity onPress={() => setShowNewSet(false)}>
+            <Ionicons name="close" size={24} color={Colors.textMuted} />
+          </TouchableOpacity>
+        </View>
+        <ScrollView style={styles.body} contentContainerStyle={{ padding: Spacing.lg }}>
+          <Text style={styles.label}>Label</Text>
+          <TextInput style={styles.input} value={newLabel} onChangeText={setNewLabel}
+            placeholder="e.g. Romanized, Translated" placeholderTextColor={Colors.textMuted} />
+          <Text style={[styles.label, { marginTop: Spacing.lg }]}>Lyrics (one line per line)</Text>
+          <TextInput style={styles.textarea} value={newLyricsText} onChangeText={setNewLyricsText}
+            placeholder="Paste lyrics here..." placeholderTextColor={Colors.textMuted}
+            multiline numberOfLines={12} textAlignVertical="top" />
+          <View style={styles.editActions}>
+            <TouchableOpacity style={styles.primaryBtn} onPress={handleCreateSet}
+              disabled={!newLyricsText.trim()}>
+              <Text style={styles.primaryBtnText}>Create Set</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // Editor mode
+  if (mode === 'edit') {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle} numberOfLines={1}>Editing Lyrics</Text>
+          <TouchableOpacity onPress={() => setMode('view')}>
+            <Ionicons name="close" size={24} color={Colors.textMuted} />
+          </TouchableOpacity>
+        </View>
+
+        {showTextEdit ? (
+          <ScrollView style={styles.body} contentContainerStyle={{ padding: Spacing.lg }}>
+            <TextInput style={styles.textarea} value={textInput} onChangeText={setTextInput}
+              multiline numberOfLines={14} textAlignVertical="top" />
+            <View style={styles.editActions}>
+              <TouchableOpacity style={styles.primaryBtn} onPress={applyTextEdit}>
+                <Text style={styles.primaryBtnText}>Apply Text</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowTextEdit(false)}>
+                <Text style={styles.ghostText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        ) : (
+          <ScrollView style={styles.body} contentContainerStyle={{ padding: Spacing.lg }}>
+            <View style={styles.editActions}>
+              <TouchableOpacity style={styles.ghostBtn} onPress={() => {
+                setTextInput(editLines.map(l => l.text).join('\n'));
+                setShowTextEdit(true);
+              }}>
+                <Text style={styles.ghostText}>Edit Text</Text>
+              </TouchableOpacity>
+              {!syncing && editLines.some(l => l.time === null) && (
+                <TouchableOpacity style={styles.primaryBtn} onPress={() => {
+                  const idx = editLines.findIndex(l => l.time === null);
+                  setSyncIdx(idx);
+                  setSyncing(true);
+                }}>
+                  <Text style={styles.primaryBtnText}>Sync Timestamps</Text>
+                </TouchableOpacity>
+              )}
+              {syncing && (
+                <>
+                  <TouchableOpacity style={styles.primaryBtn} onPress={handleStamp}>
+                    <Text style={styles.primaryBtnText}>Stamp ({syncIdx + 1}/{editLines.length})</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => { setSyncing(false); setSyncIdx(-1); }}>
+                    <Text style={styles.ghostText}>Stop</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+              <TouchableOpacity style={styles.primaryBtn} onPress={handleSave} disabled={saving}>
+                <Text style={styles.primaryBtnText}>{saving ? 'Saving...' : 'Save'}</Text>
+              </TouchableOpacity>
+            </View>
+            {syncing && (
+              <Text style={styles.syncHint}>Tap "Stamp" when each line starts playing</Text>
+            )}
+            {editLines.map((line, i) => (
+              <View key={i} style={[styles.editLine, i === syncIdx && syncing && styles.editLineActive]}>
+                <Text style={[styles.timestamp, line.time !== null && styles.timestampSet]}>
+                  {line.time !== null ? fmtTs(line.time) : '--:--.--'}
+                </Text>
+                <Text style={[styles.editLineText, line.time !== null && styles.editLineTextSet]}>
+                  {line.text}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+        )}
+      </SafeAreaView>
+    );
+  }
+
+  // View mode
+  const hasLegend = Object.keys(legend).length > 0;
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Ionicons name="chevron-down" size={24} color={Colors.white} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle} numberOfLines={1}>{song.title} — Lyrics</Text>
+        <View style={styles.headerActions}>
+          {hasLegend && (
+            <TouchableOpacity onPress={() => setShowLegend(!showLegend)}>
+              <Ionicons name="information-circle" size={22} color={Colors.textMuted} />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity onPress={startEdit}>
+            <Ionicons name="create" size={22} color={Colors.textMuted} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {sets.length > 1 && (
+        <ScrollView horizontal style={styles.setTabs} showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ gap: Spacing.sm, paddingHorizontal: Spacing.lg }}>
+          {sets.map((s: any) => (
+            <TouchableOpacity key={s.id}
+              style={[styles.setTab, s.id === activeSetId && styles.setTabActive]}
+              onPress={() => setActiveSetId(s.id)}>
+              <Text style={[styles.setTabText, s.id === activeSetId && styles.setTabTextActive]}>{s.label}</Text>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity style={[styles.setTab, styles.setTabAdd]} onPress={() => setShowNewSet(true)}>
+            <Text style={styles.setTabText}>+ New</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      )}
+
+      {showLegend && hasLegend && (
+        <View style={styles.legendPanel}>
+          <Text style={styles.legendTitle}>Singers</Text>
+          {Object.entries(legend).map(([color, name]) => (
+            <View key={color} style={styles.legendEntry}>
+              <View style={[styles.legendSwatch, { backgroundColor: SINGER_COLORS[color] || color }]} />
+              <Text style={styles.legendName}>{name as string}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      <ScrollView ref={scrollRef} style={styles.body} contentContainerStyle={styles.lyricsContent}>
+        {parsed && parsed.hasTimes ? (
+          parsed.lines.map((line, i) => {
+            const entry = colorMap[String(i)];
+            const segments = buildColoredSegments(line.text, entry);
+            const state = i === activeIdx ? 'active' : (i < activeIdx && line.time !== null ? 'past' : 'upcoming');
+            return (
+              <TouchableOpacity key={i}
+                style={[styles.lyricLine, state === 'active' && styles.lyricLineActive]}
+                onPress={() => { if (line.time !== null) seek(line.time); }}>
+                <Text style={styles.lyricLineTextWrap}>
+                  {segments.map((seg, j) => (
+                    <Text key={j} style={{ color: getSegmentColor(seg.color, state),
+                      fontSize: state === 'active' ? 20 : 16,
+                      fontWeight: state === 'active' ? '700' : '400' }}>
+                      {seg.text}
+                    </Text>
+                  ))}
+                </Text>
+              </TouchableOpacity>
+            );
+          })
+        ) : parsed && !parsed.hasTimes ? (
+          <Text style={styles.plainLyrics}>{rawLyrics}</Text>
+        ) : error && sets.length === 0 ? (
+          <View style={{ alignItems: 'center', marginTop: 40 }}>
+            <Text style={styles.muted}>{error}</Text>
+            <TouchableOpacity style={[styles.ghostBtn, { marginTop: Spacing.md }]} onPress={() => { setShowNewSet(true); }}>
+              <Text style={styles.ghostText}>Add Lyrics</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <Text style={styles.muted}>Loading...</Text>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: Colors.bg },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
+    borderBottomWidth: 1, borderBottomColor: Colors.border, gap: Spacing.md,
+  },
+  headerTitle: { flex: 1, fontSize: FontSize.md, fontWeight: '600', color: Colors.text },
+  headerActions: { flexDirection: 'row', gap: Spacing.md },
+  setTabs: { flexGrow: 0, borderBottomWidth: 1, borderBottomColor: Colors.border, paddingVertical: Spacing.sm },
+  setTab: {
+    backgroundColor: Colors.surface2, borderWidth: 1, borderColor: Colors.border,
+    borderRadius: Radius.sm, paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs,
+  },
+  setTabActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
+  setTabAdd: { borderStyle: 'dashed' },
+  setTabText: { color: Colors.textMuted, fontSize: FontSize.sm },
+  setTabTextActive: { color: Colors.white },
+  legendPanel: {
+    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
+  },
+  legendTitle: { fontSize: FontSize.sm, color: Colors.textMuted, marginBottom: Spacing.sm },
+  legendEntry: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.xs },
+  legendSwatch: { width: 14, height: 14, borderRadius: 3 },
+  legendName: { fontSize: FontSize.sm, color: Colors.text },
+  body: { flex: 1 },
+  lyricsContent: { padding: Spacing.xl, paddingBottom: 80, alignItems: 'center' },
+  lyricLine: { paddingVertical: Spacing.xs, width: '100%' },
+  lyricLineActive: {},
+  lyricLineTextWrap: { textAlign: 'center', lineHeight: 32 },
+  plainLyrics: {
+    color: Colors.text, fontSize: FontSize.lg, lineHeight: 32,
+    textAlign: 'center', fontFamily: undefined,
+  },
+  muted: { color: Colors.textMuted, fontSize: FontSize.sm, textAlign: 'center' },
+  label: { fontSize: FontSize.sm, color: Colors.textMuted, marginBottom: Spacing.xs },
+  input: {
+    backgroundColor: Colors.surface2, borderWidth: 1, borderColor: Colors.border,
+    borderRadius: Radius.sm, color: Colors.text, padding: Spacing.md, fontSize: FontSize.md,
+  },
+  textarea: {
+    backgroundColor: Colors.surface2, borderWidth: 1, borderColor: Colors.border,
+    borderRadius: Radius.sm, color: Colors.text, padding: Spacing.md,
+    fontSize: FontSize.md, minHeight: 200,
+  },
+  editActions: {
+    flexDirection: 'row', gap: Spacing.md, flexWrap: 'wrap',
+    alignItems: 'center', marginBottom: Spacing.lg,
+  },
+  primaryBtn: {
+    backgroundColor: Colors.accent, borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm,
+  },
+  primaryBtnText: { color: Colors.white, fontSize: FontSize.sm, fontWeight: '600' },
+  ghostBtn: { padding: Spacing.sm },
+  ghostText: { color: Colors.textMuted, fontSize: FontSize.sm },
+  syncHint: { color: Colors.textMuted, fontSize: FontSize.sm, marginBottom: Spacing.md },
+  editLine: {
+    flexDirection: 'row', alignItems: 'center', paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.sm, borderRadius: Radius.sm, gap: Spacing.md,
+  },
+  editLineActive: { backgroundColor: Colors.surface3 },
+  timestamp: { fontFamily: 'monospace' as any, fontSize: 11, color: Colors.accent, minWidth: 70 },
+  timestampSet: { color: Colors.accent },
+  editLineText: { flex: 1, fontSize: FontSize.md, color: Colors.textMuted },
+  editLineTextSet: { color: Colors.text },
+});
