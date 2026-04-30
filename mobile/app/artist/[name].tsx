@@ -14,7 +14,10 @@ export default function ArtistScreen() {
   const { name: rawName } = useLocalSearchParams<{ name: string }>();
   const artistName = decodeURIComponent(rawName || '');
   const router = useRouter();
-  const { songs, artists, imgVersion, refreshArtists, bumpImgVersion } = useData();
+  const dataCtx = useData();
+  const songs = dataCtx.songs || [];
+  const artists = dataCtx.artists || [];
+  const { imgVersion, refreshArtists, bumpImgVersion } = dataCtx;
   const { playSong, addToQueue } = usePlayer();
   const [uploading, setUploading] = useState(false);
 

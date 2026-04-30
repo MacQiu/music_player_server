@@ -45,24 +45,26 @@ export default function HomeScreen() {
   const [showNewPlaylist, setShowNewPlaylist] = useState(false);
   const [newName, setNewName] = useState('');
 
+  const safeSongs = songs || [];
+
   const recentlyPlayed = useMemo(() => {
     const top = analytics?.top_songs ?? [];
     return top.slice(0, 5).map((t: any) => {
-      const song = songs.find(s => s.id === t.id);
+      const song = safeSongs.find(s => s.id === t.id);
       return song || { ...t };
     });
-  }, [analytics, songs]);
+  }, [analytics, safeSongs]);
 
   const derivedArtists = useMemo(() => {
     if (artists && artists.length > 0) return artists;
     const map: Record<string, any> = {};
-    songs.forEach(s => {
+    safeSongs.forEach(s => {
       const key = s.artist || 'Unknown';
       if (!map[key]) map[key] = { name: key, song_count: 0, image_url: null };
       map[key].song_count++;
     });
     return Object.values(map);
-  }, [artists, songs]);
+  }, [artists, safeSongs]);
 
   const recommendations = analytics?.recommendations ?? [];
   const isPlaybackPlaylist = (name: string) => /^Your \d{4} Playback$/.test(name);
@@ -107,7 +109,7 @@ export default function HomeScreen() {
             {recentlyPlayed.map((s: any) => (
               <Card key={s.id} title={s.title} subtitle={s.artist || 'Unknown'}
                 coverUrl={s.cover_url} imgVersion={imgVersion}
-                onPress={() => playSong(s, songs)} />
+                onPress={() => playSong(s, safeSongs)} />
             ))}
           </CardRow>
         )}
@@ -172,11 +174,11 @@ export default function HomeScreen() {
             <Text style={styles.sectionTitle}>Recommended</Text>
             <CardRow>
               {recommendations.map((r: any) => {
-                const full = songs.find(x => x.id === r.id);
+                const full = safeSongs.find(x => x.id === r.id);
                 return (
                   <Card key={r.id} title={r.title} subtitle={r.artist || 'Unknown'}
                     coverUrl={r.cover_url} imgVersion={imgVersion} placeholder="\u2605"
-                    onPress={() => { if (full) playSong(full, songs); }} />
+                    onPress={() => { if (full) playSong(full, safeSongs); }} />
                 );
               })}
             </CardRow>

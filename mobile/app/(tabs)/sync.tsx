@@ -34,8 +34,9 @@ export default function SyncScreen() {
     setLoading(l => ({ ...l, fetch: true }));
     try {
       const data = await getSongs();
-      setSongs(data);
-      setFetchResult({ ok: true, songs: data });
+      const safeSongs = Array.isArray(data) ? data : [];
+      setSongs(safeSongs);
+      setFetchResult({ ok: true, songs: safeSongs });
     } catch {
       setFetchResult({ ok: false, songs: [] });
     }

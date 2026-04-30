@@ -37,7 +37,9 @@ function fmtListeningTime(secs: number) {
 export default function PlaylistScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { songs, refreshPlaylists, refreshSongs, imgVersion } = useData();
+  const dataCtx = useData();
+  const songs = dataCtx.songs || [];
+  const { refreshPlaylists, refreshSongs, imgVersion } = dataCtx;
   const { playSong, addToQueue } = usePlayer();
   const [playlist, setPlaylist] = useState<any>(null);
   const [loading, setLoading] = useState(true);

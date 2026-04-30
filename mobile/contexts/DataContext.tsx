@@ -52,11 +52,20 @@ type DataContextType = DataState & DataActions;
 const DataContext = createContext<DataContextType | null>(null);
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
-  const [songs, setSongs] = useState<Song[]>([]);
+  const [songs, setSongsRaw] = useState<Song[]>([]);
+  const setSongs = useCallback((val: Song[]) => {
+    setSongsRaw(Array.isArray(val) ? val : []);
+  }, []);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
-  const [playlists, setPlaylists] = useState<Playlist[]>([]);
-  const [artists, setArtists] = useState<Artist[]>([]);
+  const [playlists, setPlaylistsRaw] = useState<Playlist[]>([]);
+  const setPlaylists = useCallback((val: Playlist[]) => {
+    setPlaylistsRaw(Array.isArray(val) ? val : []);
+  }, []);
+  const [artists, setArtistsRaw] = useState<Artist[]>([]);
+  const setArtists = useCallback((val: Artist[]) => {
+    setArtistsRaw(Array.isArray(val) ? val : []);
+  }, []);
   const [online, setOnline] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [imgVersion, setImgVersion] = useState(0);
@@ -71,7 +80,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     } catch (err: any) {
       setError(`Failed to load songs: ${err.message}`);
     }
-  }, []);
+  }, [setSongs]);
 
   const refreshAnalytics = useCallback(async () => {
     setAnalyticsLoading(true);
@@ -87,14 +96,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       const data = await getPlaylists();
       setPlaylists(data);
     } catch { }
-  }, []);
+  }, [setPlaylists]);
 
   const refreshArtists = useCallback(async () => {
     try {
       const data = await getArtists();
       setArtists(data);
     } catch { }
-  }, []);
+  }, [setArtists]);
 
   const checkOnline = useCallback(async () => {
     try {

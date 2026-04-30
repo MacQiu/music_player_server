@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { Audio, AVPlaybackStatus } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, AudioPlayer, AudioStatus } from 'expo-audio';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getDownloadUrl, postPlaylog } from '../api/client';
+import { getDownloadUrl, postPlaylog, getCoverUrl } from '../api/client';
 
 export interface Song {
   id: string;
@@ -15,7 +15,6 @@ export interface Song {
   sort_order?: number;
   downloaded?: number;
   date_added?: string;
-  // Wrapped extras
   play_count?: number;
   total_time?: number;
   position?: number;
@@ -54,12 +53,13 @@ const PlayerContext = createContext<PlayerContextType | null>(null);
 const STORAGE_KEY = 'mp_resume';
 
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const playerRef = useRef<AudioPlayer | null>(null);
   const loggedTimeRef = useRef(0);
   const logIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const shouldPlayRef = useRef(false);
   const originalSourceRef = useRef<Song[] | null>(null);
   const resumedRef = useRef(false);
+  const currentSongRef = useRef<Song | null>(null);
 
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -72,63 +72,83 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [repeatMode, setRepeatMode] = useState<'none' | 'playlist' | 'song'>('none');
   const [shuffleEnabled, setShuffleEnabled] = useState(false);
 
-  // Configure audio mode
+  // Keep a ref in sync so the status listener can read the latest song
+  useEffect(() => { currentSongRef.current = currentSong; }, [currentSong]);
+
+  // Configure audio mode once
   useEffect(() => {
-    Audio.setAudioModeAsync({
-      staysActiveInBackground: true,
-      playsInSilentModeIOS: true,
+    setAudioModeAsync({
+      playsInSilentMode: true,
+      shouldPlayInBackground: true,
+      interruptionMode: 'doNotMix',
     });
   }, []);
 
-  // Playback status update handler
-  const onPlaybackStatus = useCallback((status: AVPlaybackStatus) => {
-    if (!status.isLoaded) return;
-    setPlaying(status.isPlaying);
-    setCurrentTime((status.positionMillis ?? 0) / 1000);
-    setDuration((status.durationMillis ?? 0) / 1000);
+  // Create a persistent AudioPlayer and subscribe to status updates
+  useEffect(() => {
+    const player = createAudioPlayer();
+    playerRef.current = player;
 
-    if (status.didJustFinish) {
-      handleSongEndRef.current();
-    }
+    const subscription = player.addListener('playbackStatusUpdate', (status: AudioStatus) => {
+      if (!status.isLoaded) return;
+      setPlaying(status.playing);
+      setCurrentTime(status.currentTime);
+      setDuration(status.duration);
+
+      if (status.didJustFinish) {
+        handleSongEndRef.current();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+      player.remove();
+      playerRef.current = null;
+    };
   }, []);
 
   // Load and play a song
-  const loadSong = useCallback(async (song: Song, autoPlay: boolean, seekTo?: number) => {
-    if (soundRef.current) {
-      await soundRef.current.unloadAsync();
-      soundRef.current = null;
-    }
+  const loadSong = useCallback((song: Song, autoPlay: boolean, seekTo?: number) => {
+    const player = playerRef.current;
+    if (!player) return;
 
     const url = getDownloadUrl(song.id);
-    const { sound } = await Audio.Sound.createAsync(
-      { uri: url },
-      {
-        shouldPlay: autoPlay,
-        isLooping: repeatMode === 'song',
-        positionMillis: seekTo ? seekTo * 1000 : 0,
-      },
-      onPlaybackStatus,
-    );
-    soundRef.current = sound;
+    player.replace({ uri: url });
+    player.loop = repeatMode === 'song';
     loggedTimeRef.current = 0;
-  }, [onPlaybackStatus, repeatMode]);
+
+    if (seekTo && seekTo > 0) {
+      player.seekTo(seekTo);
+    }
+
+    if (autoPlay) {
+      player.play();
+    }
+
+    player.setActiveForLockScreen(true, {
+      title: song.title,
+      artist: song.artist || 'Unknown',
+      albumTitle: song.album || '',
+      artworkUrl: song.cover_url ? getCoverUrl(song.id) : undefined,
+    });
+  }, [repeatMode]);
 
   // Update loop mode when repeat changes
   useEffect(() => {
-    if (soundRef.current) {
-      soundRef.current.setIsLoopingAsync(repeatMode === 'song');
+    if (playerRef.current) {
+      playerRef.current.loop = repeatMode === 'song';
     }
   }, [repeatMode]);
 
   // Play log interval
   const sendLog = useCallback(() => {
-    if (!currentSong || !soundRef.current) return;
+    if (!currentSongRef.current || !playerRef.current) return;
     const elapsed = currentTime - loggedTimeRef.current;
     if (elapsed >= 5) {
-      postPlaylog(currentSong.id, elapsed).catch(() => {});
+      postPlaylog(currentSongRef.current.id, elapsed).catch(() => {});
       loggedTimeRef.current = currentTime;
     }
-  }, [currentSong, currentTime]);
+  }, [currentTime]);
 
   useEffect(() => {
     if (playing) {
@@ -206,24 +226,24 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     shouldPlayRef.current = true;
   }, [sourceList]);
 
-  const toggle = useCallback(async () => {
-    if (!soundRef.current) return;
+  const toggle = useCallback(() => {
+    if (!playerRef.current) return;
     if (playing) {
-      await soundRef.current.pauseAsync();
+      playerRef.current.pause();
     } else {
-      await soundRef.current.playAsync();
+      playerRef.current.play();
     }
   }, [playing]);
 
-  const seek = useCallback(async (time: number) => {
-    if (soundRef.current) {
-      await soundRef.current.setPositionAsync(time * 1000);
+  const seek = useCallback((time: number) => {
+    if (playerRef.current) {
+      playerRef.current.seekTo(time);
     }
   }, []);
 
-  const playPrevious = useCallback(async () => {
+  const playPrevious = useCallback(() => {
     if (currentTime > 3) {
-      await seek(0);
+      seek(0);
       return;
     }
     if (sourceIndex > 0) {
@@ -309,8 +329,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setSourceList(songs);
       setSourceIndex(songs.findIndex(s => s.id === songId));
       shouldPlayRef.current = false;
-      // Load paused at position
-      await loadSong(song, false, position || 0);
+      loadSong(song, false, position || 0);
     } catch { /* ignore corrupt data */ }
   }, [loadSong]);
 

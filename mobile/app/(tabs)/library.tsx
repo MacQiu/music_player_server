@@ -24,7 +24,10 @@ function sortSongs(list: Song[], field: string, dir: string) {
 }
 
 export default function LibraryScreen() {
-  const { songs, playlists, imgVersion, bumpImgVersion, refreshSongs } = useData();
+  const data = useData();
+  const songs = data.songs || [];
+  const playlists = data.playlists || [];
+  const { imgVersion, bumpImgVersion, refreshSongs } = data;
   const { playSong, addToQueue } = usePlayer();
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState<string | null>(null);
