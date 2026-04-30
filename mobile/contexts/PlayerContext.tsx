@@ -125,12 +125,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       player.play();
     }
 
-    player.setActiveForLockScreen(true, {
-      title: song.title,
-      artist: song.artist || 'Unknown',
-      albumTitle: song.album || '',
-      artworkUrl: song.cover_url ? getCoverUrl(song.id) : undefined,
-    });
+    if (typeof player.setActiveForLockScreen === 'function') {
+      player.setActiveForLockScreen(true, {
+        title: song.title,
+        artist: song.artist || 'Unknown',
+        albumTitle: song.album || '',
+        artworkUrl: song.cover_url ? getCoverUrl(song.id) : undefined,
+      });
+    }
   }, [repeatMode]);
 
   // Update loop mode when repeat changes
