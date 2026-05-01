@@ -289,6 +289,15 @@ section { margin-bottom: 1.5rem; }
   border-radius: 10px;
 }
 
+.right-panel-wrapper {
+  width: 280px;
+  min-width: 200px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  height: 100%;
+}
+
 .resize-handle {
   width: 4px;
   background: transparent;

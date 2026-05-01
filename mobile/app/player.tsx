@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { useSharedValue, useAnimatedStyle, withTiming, Easing } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, Easing, runOnJS } from 'react-native-reanimated';
 import { usePlayer } from '../contexts/PlayerContext';
 import { useData } from '../contexts/DataContext';
 import { getBaseUrl } from '../api/client';
@@ -49,7 +49,7 @@ export default function PlayerScreen() {
   const panGesture = Gesture.Pan()
     .onEnd((e) => {
       if (e.translationY > SWIPE_THRESHOLD) {
-        dismiss();
+        runOnJS(dismiss)();
       }
     });
 

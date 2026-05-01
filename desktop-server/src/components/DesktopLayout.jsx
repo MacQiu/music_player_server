@@ -38,16 +38,15 @@ export default function DesktopLayout({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [topbarSearch, setTopbarSearch] = useState('');
   const mainRef = useRef(null);
-
+  const viewRef = useRef(view);
+  viewRef.current = view;
 
   const navigate = useCallback((newView) => {
-    setView(prev => {
-      const sameKind = prev.page === newView.page;
-      if (!sameKind) {
-        setViewHistory(h => [...h, prev]);
-      }
-      return newView;
-    });
+    const prev = viewRef.current;
+    if (prev.page !== newView.page) {
+      setViewHistory(h => [...h, prev]);
+    }
+    setView(newView);
     mainRef.current?.scrollTo(0, 0);
   }, []);
 
@@ -61,11 +60,10 @@ export default function DesktopLayout({
   }, []);
 
   const navigateTo = useCallback((page) => {
-    setView(prev => {
-      if (prev.page === page) return prev;
-      setViewHistory([]);
-      return { page };
-    });
+    const prev = viewRef.current;
+    if (prev.page === page) return;
+    setViewHistory([]);
+    setView({ page });
     mainRef.current?.scrollTo(0, 0);
   }, []);
 
@@ -203,7 +201,7 @@ export default function DesktopLayout({
       </div>
 
       <div className="desktop__body">
-        <PanelGroup orientation="horizontal">
+        <PanelGroup orientation="horizontal" style={{ flex: 1 }}>
           <Panel
             id="left"
             defaultSize={sidebarCollapsed ? 72 : "16%"}
@@ -231,29 +229,26 @@ export default function DesktopLayout({
               {renderMain()}
             </main>
           </Panel>
-
-          {rightPanel && (
-            <>
-              <PanelResizeHandle className="resize-handle" />
-              <Panel id="right" defaultSize="15%" minSize="15%" maxSize="35%">
-                <NowPlayingPanel
-                  mode={rightPanel}
-                  onModeChange={setRightPanel}
-                  onClose={() => setRightPanel(null)}
-                  currentSong={currentSong}
-                  sourceList={sourceList}
-                  sourceIndex={sourceIndex}
-                  manualQueue={manualQueue}
-                  removeFromQueue={removeFromQueue}
-                  reorderQueue={reorderQueue}
-                  jumpToQueueIndex={jumpToQueueIndex}
-                  playSong={playSong}
-                  imgVersion={imgVersion}
-                />
-              </Panel>
-            </>
-          )}
         </PanelGroup>
+
+        {rightPanel && (
+          <div className="right-panel-wrapper">
+            <NowPlayingPanel
+              mode={rightPanel}
+              onModeChange={setRightPanel}
+              onClose={() => setRightPanel(null)}
+              currentSong={currentSong}
+              sourceList={sourceList}
+              sourceIndex={sourceIndex}
+              manualQueue={manualQueue}
+              removeFromQueue={removeFromQueue}
+              reorderQueue={reorderQueue}
+              jumpToQueueIndex={jumpToQueueIndex}
+              playSong={playSong}
+              imgVersion={imgVersion}
+            />
+          </div>
+        )}
       </div>
 
       <DesktopPlayer
