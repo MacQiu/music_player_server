@@ -30,7 +30,7 @@ function CustomTabBar({ state, navigation }: any) {
       <View style={[styles.tabBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
         {state.routes.map((route: any, index: number) => {
           const focused = state.index === index;
-          const color = focused ? Colors.accent : Colors.textMuted;
+          const color = focused ? Colors.white : Colors.textMuted;
           const icon = TAB_ICONS[route.name] || 'ellipse';
           const label = TAB_LABELS[route.name] || route.name;
 
@@ -79,8 +79,8 @@ const styles = StyleSheet.create({
   },
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: Colors.surface2,
-    borderTopColor: Colors.border,
+    backgroundColor: Colors.surface,
+    borderTopColor: 'rgba(255,255,255,0.07)',
     borderTopWidth: 1,
     paddingTop: 8,
   },

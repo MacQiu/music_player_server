@@ -1,7 +1,8 @@
 import React, { useMemo, useState, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, FlatList, TextInput, StyleSheet, Alert, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, FlatList, TextInput, StyleSheet, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import CoverImage from '../../components/CoverImage';
 import { useData } from '../../contexts/DataContext';
@@ -9,11 +10,22 @@ import { usePlayer } from '../../contexts/PlayerContext';
 import { createPlaylist, uploadArtistImage } from '../../api/client';
 import { Colors, Spacing, FontSize, Radius } from '../../constants/theme';
 
-function CardRow({ children }: { children: React.ReactNode }) {
+function HorizontalCard({ title, coverUrl, songId, cacheKey, onPress, imgVersion, placeholder = '\u266A' }: any) {
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cardRow}>
-      {children}
-    </ScrollView>
+    <TouchableOpacity style={styles.hCard} onPress={onPress} activeOpacity={0.7}>
+      <CoverImage coverUrl={coverUrl} songId={songId} cacheKey={cacheKey} size={56} placeholder={placeholder} imgVersion={imgVersion} />
+      <View style={styles.hCardInfo}>
+        <Text style={styles.hCardTitle} numberOfLines={1}>{title}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function SectionHeader({ title }: { title: string }) {
+  return (
+    <View style={styles.sectionHdr}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+    </View>
   );
 }
 
@@ -30,13 +42,26 @@ interface CardProps {
   dashed?: boolean;
 }
 
+const CARD_WIDTH = 150;
+const CARD_IMG_SIZE = CARD_WIDTH - Spacing.sm * 2;
+
 function Card({ title, subtitle, coverUrl, songId, cacheKey, placeholder = '\u266A', round, onPress, imgVersion, dashed }: CardProps) {
   return (
     <TouchableOpacity style={[styles.card, dashed && styles.cardDashed]} onPress={onPress} activeOpacity={0.7}>
-      <CoverImage coverUrl={coverUrl} songId={songId} cacheKey={cacheKey} size={120} round={round} placeholder={placeholder} imgVersion={imgVersion} />
+      <View style={styles.cardImgWrap}>
+        <CoverImage coverUrl={coverUrl} songId={songId} cacheKey={cacheKey} size={CARD_IMG_SIZE} round={round} placeholder={placeholder} imgVersion={imgVersion} />
+      </View>
       <Text style={styles.cardTitle} numberOfLines={1}>{title}</Text>
       <Text style={styles.cardSub} numberOfLines={1}>{subtitle}</Text>
     </TouchableOpacity>
+  );
+}
+
+function CardRow({ children }: { children: React.ReactNode }) {
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cardRow}>
+      {children}
+    </ScrollView>
   );
 }
 
@@ -55,9 +80,9 @@ export default function HomeScreen() {
 
   const safeSongs = songs || [];
 
-  const recentlyPlayed = useMemo(() => {
+  const topTracks = useMemo(() => {
     const top = analytics?.top_songs ?? [];
-    return top.slice(0, 5).map((t: any) => {
+    return top.slice(0, 8).map((t: any) => {
       const song = safeSongs.find(s => s.id === t.id);
       return song || { ...t };
     });
@@ -90,55 +115,56 @@ export default function HomeScreen() {
     } catch { }
   };
 
-  const handleArtistImageUpload = async (artistName: string) => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.8,
-    });
-    if (result.canceled || !result.assets[0]) return;
-    const asset = result.assets[0];
-    try {
-      await uploadArtistImage(artistName, asset.uri, asset.fileName || 'image.jpg');
-      refreshArtists();
-      bumpImgVersion();
-    } catch { }
+  const greeting = () => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good Morning';
+    if (h < 18) return 'Good Afternoon';
+    return 'Good Evening';
   };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView style={styles.page} contentContainerStyle={styles.pageContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />}>
-        <Text style={styles.heading}>Home</Text>
 
-        <Text style={styles.sectionTitle}>Recently Played</Text>
-        {recentlyPlayed.length === 0 ? (
-          <Text style={styles.muted}>No plays yet</Text>
-        ) : (
-          <CardRow>
-            {recentlyPlayed.map((s: any) => (
-              <Card key={s.id} title={s.title} subtitle={s.artist || 'Unknown'}
+        <LinearGradient colors={['rgba(29,185,84,0.3)', 'rgba(29,185,84,0.08)', 'transparent']}
+          style={styles.greetingGradient}>
+          <Text style={styles.greeting}>{greeting()}</Text>
+        </LinearGradient>
+
+        {topTracks.length > 0 && (
+          <View style={styles.topGrid}>
+            {topTracks.slice(0, 8).map((s: any) => (
+              <HorizontalCard key={s.id} title={s.title}
                 coverUrl={s.cover_url} songId={s.id} imgVersion={imgVersion}
                 onPress={() => playSong(s, safeSongs)} />
             ))}
-          </CardRow>
+          </View>
         )}
 
-        <Text style={styles.sectionTitle}>Artists</Text>
-        {derivedArtists.length === 0 ? (
-          <Text style={styles.muted}>No artists yet</Text>
-        ) : (
-          <CardRow>
-            {derivedArtists.map((a: any) => (
-              <Card key={a.name} title={a.name}
-                subtitle={`${a.song_count} song${a.song_count !== 1 ? 's' : ''}`}
-                coverUrl={a.image_url} cacheKey={`artist_${a.name}`} round placeholder="\uD83C\uDFA4"
-                imgVersion={imgVersion}
-                onPress={() => router.push(`/artist/${encodeURIComponent(a.name)}`)} />
-            ))}
-          </CardRow>
+        {topTracks.length === 0 && (
+          <>
+            <SectionHeader title="Recently Played" />
+            <Text style={styles.muted}>No plays yet</Text>
+          </>
         )}
 
-        <Text style={styles.sectionTitle}>Playlists</Text>
+        {derivedArtists.length > 0 && (
+          <>
+            <SectionHeader title="Artists" />
+            <CardRow>
+              {derivedArtists.map((a: any) => (
+                <Card key={a.name} title={a.name}
+                  subtitle={`${a.song_count} song${a.song_count !== 1 ? 's' : ''}`}
+                  coverUrl={a.image_url} cacheKey={`artist_${a.name}`} round placeholder="\uD83C\uDFA4"
+                  imgVersion={imgVersion}
+                  onPress={() => router.push(`/artist/${encodeURIComponent(a.name)}`)} />
+              ))}
+            </CardRow>
+          </>
+        )}
+
+        <SectionHeader title="Playlists" />
         <CardRow>
           {userPlaylists.map((p: any) => (
             <Card key={p.id} title={p.name}
@@ -166,7 +192,7 @@ export default function HomeScreen() {
 
         {wrappedPlaylists.length > 0 && (
           <>
-            <Text style={styles.sectionTitle}>Wrapped</Text>
+            <SectionHeader title="Wrapped" />
             <CardRow>
               {wrappedPlaylists.map((p: any) => (
                 <Card key={p.id} title={p.name}
@@ -180,7 +206,7 @@ export default function HomeScreen() {
 
         {recommendations.length > 0 && (
           <>
-            <Text style={styles.sectionTitle}>Recommended</Text>
+            <SectionHeader title="Recommended" />
             <CardRow>
               {recommendations.map((r: any) => {
                 const full = safeSongs.find(x => x.id === r.id);
@@ -201,94 +227,55 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: Colors.bg,
-  },
-  page: {
-    flex: 1,
-  },
-  pageContent: {
-    padding: Spacing.lg,
-  },
-  heading: {
-    fontSize: FontSize.title,
-    fontWeight: '700',
-    color: Colors.text,
-    marginBottom: Spacing.lg,
-  },
-  sectionTitle: {
-    fontSize: FontSize.lg,
-    fontWeight: '600',
-    color: Colors.textMuted,
+  safeArea: { flex: 1, backgroundColor: Colors.bg },
+  page: { flex: 1 },
+  pageContent: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.lg },
+  greetingGradient: {
+    marginHorizontal: -Spacing.lg,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing.xl,
     marginBottom: Spacing.sm,
-    marginTop: Spacing.lg,
   },
-  muted: {
-    color: Colors.textMuted,
-    fontSize: FontSize.sm,
+  greeting: { fontSize: 28, fontWeight: '700', color: Colors.text },
+  sectionHdr: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: Spacing.xl, marginBottom: Spacing.md },
+  sectionTitle: { fontSize: 22, fontWeight: '700', color: Colors.text },
+  muted: { color: Colors.textMuted, fontSize: FontSize.sm },
+  topGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: Spacing.md,
   },
-  cardRow: {
-    gap: Spacing.md,
-    paddingBottom: Spacing.sm,
-  },
-  card: {
-    width: 140,
-    backgroundColor: Colors.surface2,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: Radius.md,
-    overflow: 'hidden',
-    alignItems: 'center',
-  },
-  cardDashed: {
-    borderStyle: 'dashed',
-  },
-  cardTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.text,
-    paddingHorizontal: Spacing.sm,
-    paddingTop: Spacing.xs,
-    width: '100%',
-  },
-  cardSub: {
-    fontSize: 11,
-    color: Colors.textMuted,
-    paddingHorizontal: Spacing.sm,
-    paddingBottom: Spacing.sm,
-    width: '100%',
-  },
-  inlineForm: {
+  hCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm,
-    marginTop: Spacing.sm,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderRadius: Radius.sm,
+    overflow: 'hidden',
+    width: '48.5%' as any,
+    height: 56,
   },
+  hCardInfo: { flex: 1, paddingHorizontal: Spacing.sm },
+  hCardTitle: { fontSize: 12, fontWeight: '700', color: Colors.text },
+  cardRow: { gap: Spacing.md, paddingBottom: Spacing.sm },
+  card: {
+    width: CARD_WIDTH,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    overflow: 'hidden',
+    padding: Spacing.sm,
+  },
+  cardDashed: { borderWidth: 1, borderStyle: 'dashed', borderColor: Colors.textMuted },
+  cardImgWrap: { borderRadius: Radius.sm, overflow: 'hidden', marginBottom: Spacing.sm },
+  cardTitle: { fontSize: 13, fontWeight: '600', color: Colors.text, marginBottom: 2 },
+  cardSub: { fontSize: 11, color: Colors.textMuted },
+  inlineForm: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.sm },
   inlineInput: {
-    flex: 1,
-    backgroundColor: Colors.surface2,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: Radius.sm,
-    color: Colors.text,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    fontSize: FontSize.sm,
+    flex: 1, backgroundColor: Colors.surface2, borderRadius: Radius.sm,
+    color: Colors.text, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, fontSize: FontSize.sm,
   },
-  inlineBtn: {
-    backgroundColor: Colors.accent,
-    borderRadius: Radius.sm,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  inlineBtnText: {
-    color: Colors.white,
-    fontSize: FontSize.sm,
-    fontWeight: '600',
-  },
-  cancelText: {
-    color: Colors.textMuted,
-    fontSize: FontSize.sm,
-  },
+  inlineBtn: { backgroundColor: Colors.accent, borderRadius: Radius.round, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
+  inlineBtnText: { color: '#000', fontSize: FontSize.sm, fontWeight: '700' },
+  cancelText: { color: Colors.textMuted, fontSize: FontSize.sm },
 });

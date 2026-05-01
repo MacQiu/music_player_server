@@ -49,6 +49,7 @@ interface DataActions {
   refreshAll: () => Promise<void>;
   setSongs: (songs: Song[]) => void;
   bumpImgVersion: () => void;
+  updateLocalAnalytics: (patch: Partial<Analytics>) => void;
 }
 
 type DataContextType = DataState & DataActions;
@@ -153,6 +154,22 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     await Promise.all([refreshSongs(), refreshAnalytics(), refreshPlaylists(), refreshArtists()]);
   }, [refreshSongs, refreshAnalytics, refreshPlaylists, refreshArtists]);
 
+  const updateLocalAnalytics = useCallback((patch: Partial<Analytics>) => {
+    setAnalytics(prev => {
+      const merged: Analytics = {
+        top_songs: patch.top_songs ?? prev?.top_songs ?? [],
+        top_artists: patch.top_artists ?? prev?.top_artists ?? [],
+        total_listening_time: (prev?.total_listening_time ?? 0) + (patch.total_listening_time ?? 0),
+        total_plays: (prev?.total_plays ?? 0) + (patch.total_plays ?? 0),
+        recommendations: patch.recommendations ?? prev?.recommendations ?? [],
+        play_history: patch.play_history ?? prev?.play_history ?? [],
+      };
+      analyticsRef.current = merged;
+      saveCache(CACHE_ANALYTICS, merged);
+      return merged;
+    });
+  }, []);
+
   const wasOnlineRef = useRef(false);
 
   const checkOnline = useCallback(async () => {
@@ -187,7 +204,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const value: DataContextType = {
     songs, analytics, analyticsLoading, playlists, artists, online, error, imgVersion,
     refreshSongs, refreshAnalytics, refreshPlaylists, refreshArtists, refreshAll,
-    setSongs, bumpImgVersion,
+    setSongs, bumpImgVersion, updateLocalAnalytics,
   };
 
   return (

@@ -56,7 +56,7 @@ export default function Sync({ online, onRefreshSongs }) {
             ) : serverOk === false ? (
               <svg viewBox="0 0 24 24" width="24" height="24" fill="#ef4444"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
             ) : (
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="#8b8d9a"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="#b3b3b3"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
             )}
           </div>
           <div className="sync-row__text">
@@ -77,7 +77,7 @@ export default function Sync({ online, onRefreshSongs }) {
             ) : syncOk === false ? (
               <svg viewBox="0 0 24 24" width="24" height="24" fill="#ef4444"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
             ) : (
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="#8b8d9a"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 004 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="#b3b3b3"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 004 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
             )}
           </div>
           <div className="sync-row__text">
@@ -98,7 +98,7 @@ export default function Sync({ online, onRefreshSongs }) {
             ) : fetchResult && !fetchResult.ok ? (
               <svg viewBox="0 0 24 24" width="24" height="24" fill="#ef4444"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
             ) : (
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="#8b8d9a"><path d="M19.35 10.04A7.49 7.49 0 0012 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 000 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="#b3b3b3"><path d="M19.35 10.04A7.49 7.49 0 0012 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 000 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
             )}
           </div>
           <div className="sync-row__text">

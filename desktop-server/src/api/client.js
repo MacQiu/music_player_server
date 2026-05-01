@@ -84,6 +84,12 @@ export async function uploadArtistImage(name, imageFile) {
   return request('POST', `/artists/${encodeURIComponent(name)}/image`, { body: form, isFormData: true });
 }
 
+export async function updateArtistPosition(name, imagePosition) {
+  return request('PUT', `/artists/${encodeURIComponent(name)}/position`, {
+    body: { image_position: imagePosition },
+  });
+}
+
 // ---- Playlists ----
 
 export async function getPlaylists() {

@@ -9,18 +9,18 @@ import { Colors, Spacing, FontSize, Radius } from '../../constants/theme';
 const screenWidth = Dimensions.get('window').width - 48;
 
 const chartConfig = {
-  backgroundColor: Colors.surface2,
-  backgroundGradientFrom: Colors.surface2,
-  backgroundGradientTo: Colors.surface2,
+  backgroundColor: Colors.surface,
+  backgroundGradientFrom: Colors.surface,
+  backgroundGradientTo: Colors.surface,
   decimalPlaces: 0,
-  color: (opacity = 1) => `rgba(108, 99, 255, ${opacity})`,
+  color: (opacity = 1) => `rgba(29, 185, 84, ${opacity})`,
   labelColor: () => Colors.textMuted,
   barPercentage: 0.6,
   propsForLabels: { fontSize: 9 },
 };
 
-const greenChartConfig = { ...chartConfig, color: (opacity = 1) => `rgba(34, 197, 94, ${opacity})` };
-const orangeChartConfig = { ...chartConfig, color: (opacity = 1) => `rgba(255, 85, 0, ${opacity})` };
+const greenChartConfig = { ...chartConfig, color: (opacity = 1) => `rgba(30, 215, 96, ${opacity})` };
+const orangeChartConfig = { ...chartConfig, color: (opacity = 1) => `rgba(29, 185, 84, ${opacity})` };
 
 function fmtTime(secs: number) {
   if (!secs) return '0s';
@@ -188,23 +188,23 @@ const styles = StyleSheet.create({
   muted: { color: Colors.textMuted, fontSize: FontSize.sm },
   statsRow: { flexDirection: 'row', gap: Spacing.md, marginBottom: Spacing.lg },
   statCard: {
-    flex: 1, backgroundColor: Colors.surface2, borderWidth: 1, borderColor: Colors.border,
+    flex: 1, backgroundColor: Colors.surface, borderWidth: 0, borderColor: 'transparent',
     borderRadius: Radius.md, padding: Spacing.lg, alignItems: 'center',
   },
   statValue: { fontSize: FontSize.xxl, fontWeight: '700', color: Colors.accent },
   statLabel: { fontSize: FontSize.xs, color: Colors.textMuted, marginTop: Spacing.xs },
   chartBox: {
-    backgroundColor: Colors.surface2, borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.surface, borderWidth: 0, borderColor: 'transparent',
     borderRadius: Radius.md, padding: Spacing.sm, overflow: 'hidden',
   },
   chart: { borderRadius: Radius.md },
   wrappedHeader: { marginTop: Spacing.lg },
   yearPicker: { flexDirection: 'row', gap: Spacing.xs, flexWrap: 'wrap', marginBottom: Spacing.md },
   yearBtn: {
-    backgroundColor: Colors.surface2, borderWidth: 1, borderColor: Colors.border,
-    borderRadius: Radius.sm, paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs,
+    backgroundColor: 'rgba(255,255,255,0.07)', borderWidth: 0, borderColor: 'transparent',
+    borderRadius: Radius.round, paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs + 2,
   },
-  yearBtnActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
-  yearBtnText: { color: Colors.textMuted, fontSize: FontSize.xs },
-  yearBtnTextActive: { color: Colors.white },
+  yearBtnActive: { backgroundColor: '#fff' },
+  yearBtnText: { color: Colors.text, fontSize: FontSize.xs },
+  yearBtnTextActive: { color: '#000' },
 });

@@ -64,10 +64,10 @@ export default function Analytics({ analytics, loading }) {
           <div className="chart-container chart-container--mobile">
             <ResponsiveContainer width="100%" height={180}>
               <BarChart data={songChartData}>
-                <XAxis dataKey="name" tick={{ fill: '#8b8d9a', fontSize: 10 }} />
-                <YAxis tick={{ fill: '#8b8d9a', fontSize: 10 }} />
-                <Tooltip contentStyle={{ background: '#1a1d27', border: '1px solid #2d3142', borderRadius: 8, color: '#e8e8ed', fontSize: 12 }} />
-                <Bar dataKey="plays" fill="#6c63ff" radius={[4, 4, 0, 0]} />
+                <XAxis dataKey="name" tick={{ fill: '#b3b3b3', fontSize: 10 }} />
+                <YAxis tick={{ fill: '#b3b3b3', fontSize: 10 }} />
+                <Tooltip contentStyle={{ background: '#282828', border: 'none', borderRadius: 8, color: '#fff', fontSize: 12 }} />
+                <Bar dataKey="plays" fill="#1db954" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -80,9 +80,9 @@ export default function Analytics({ analytics, loading }) {
           <div className="chart-container chart-container--mobile">
             <ResponsiveContainer width="100%" height={180}>
               <BarChart data={artistChartData}>
-                <XAxis dataKey="name" tick={{ fill: '#8b8d9a', fontSize: 10 }} />
-                <YAxis tick={{ fill: '#8b8d9a', fontSize: 10 }} />
-                <Tooltip contentStyle={{ background: '#1a1d27', border: '1px solid #2d3142', borderRadius: 8, color: '#e8e8ed', fontSize: 12 }} />
+                <XAxis dataKey="name" tick={{ fill: '#b3b3b3', fontSize: 10 }} />
+                <YAxis tick={{ fill: '#b3b3b3', fontSize: 10 }} />
+                <Tooltip contentStyle={{ background: '#282828', border: 'none', borderRadius: 8, color: '#fff', fontSize: 12 }} />
                 <Bar dataKey="minutes" fill="#22c55e" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -116,9 +116,9 @@ export default function Analytics({ analytics, loading }) {
                   <BarChart data={(wrapped.top_songs || []).slice(0, 5).map(s => ({
                     name: s.title.length > 10 ? s.title.slice(0, 10) + '\u2026' : s.title, plays: s.play_count,
                   }))}>
-                    <XAxis dataKey="name" tick={{ fill: '#8b8d9a', fontSize: 9 }} />
-                    <YAxis tick={{ fill: '#8b8d9a', fontSize: 9 }} />
-                    <Tooltip contentStyle={{ background: '#1a1d27', border: '1px solid #2d3142', borderRadius: 8, color: '#e8e8ed', fontSize: 11 }} />
+                    <XAxis dataKey="name" tick={{ fill: '#b3b3b3', fontSize: 9 }} />
+                    <YAxis tick={{ fill: '#b3b3b3', fontSize: 9 }} />
+                    <Tooltip contentStyle={{ background: '#282828', border: 'none', borderRadius: 8, color: '#fff', fontSize: 11 }} />
                     <Bar dataKey="plays" fill="#ff5500" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>

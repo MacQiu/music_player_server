@@ -19,6 +19,7 @@ import os
 import random
 import re
 import time
+from urllib.parse import quote as url_quote
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
@@ -288,7 +289,8 @@ def create_app() -> Flask:
     def list_artists():
         with db.get_conn() as conn:
             rows = conn.execute(
-                "SELECT a.name, a.image_path, a.created_at, "
+                "SELECT a.name, a.image_path, a.image_position, "
+                "a.image_position_mobile, a.created_at, "
                 "COUNT(s.id) AS song_count "
                 "FROM artists a LEFT JOIN songs s ON s.artist = a.name "
                 "GROUP BY a.name ORDER BY a.name"
@@ -296,7 +298,7 @@ def create_app() -> Flask:
         result = []
         for r in rows:
             d = dict(r)
-            d["image_url"] = f"/artist-image/{d['name']}" if d.get("image_path") else None
+            d["image_url"] = f"/artist-image/{url_quote(d['name'])}" if d.get("image_path") else None
             result.append(d)
         return jsonify(result)
 
@@ -319,7 +321,27 @@ def create_app() -> Flask:
                 "ON CONFLICT(name) DO UPDATE SET image_path = excluded.image_path",
                 (name, rel_path),
             )
-        return jsonify({"ok": True, "image_url": f"/artist-image/{name}"})
+        return jsonify({"ok": True, "image_url": f"/artist-image/{url_quote(name)}"})
+
+    @app.put("/artists/<path:name>/position")
+    def update_artist_position(name: str):
+        data = request.get_json(force=True) or {}
+        position = data.get("image_position")
+        position_mobile = data.get("image_position_mobile")
+        if not position and not position_mobile:
+            return jsonify({"error": "provide image_position or image_position_mobile"}), 400
+        with db.get_conn() as conn:
+            if position:
+                conn.execute(
+                    "UPDATE artists SET image_position = ? WHERE name = ?",
+                    (position, name),
+                )
+            if position_mobile:
+                conn.execute(
+                    "UPDATE artists SET image_position_mobile = ? WHERE name = ?",
+                    (position_mobile, name),
+                )
+        return jsonify({"ok": True})
 
     @app.get("/artist-image/<path:name>")
     def get_artist_image(name: str):

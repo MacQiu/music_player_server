@@ -270,7 +270,7 @@ export default function PlayerScreen() {
             </TouchableOpacity>
             <TouchableOpacity onPress={toggle} style={styles.controlBtn}>
               <View style={[styles.playBtnInner, showPanning && styles.playBtnPanning]}>
-                <Ionicons name={playing ? 'pause' : 'play'} size={32} color={Colors.white} />
+                <Ionicons name={playing ? 'pause' : 'play'} size={32} color={showPanning ? Colors.white : '#000'} />
               </View>
             </TouchableOpacity>
             <TouchableOpacity onPress={playNext} style={styles.controlBtn}>
@@ -362,8 +362,8 @@ const styles = StyleSheet.create({
   },
   controlBtn: { padding: Spacing.sm },
   playBtnInner: {
-    width: 56, height: 56, borderRadius: 28,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    width: 60, height: 60, borderRadius: 30,
+    backgroundColor: '#fff',
     alignItems: 'center', justifyContent: 'center',
   },
   playBtnPanning: {

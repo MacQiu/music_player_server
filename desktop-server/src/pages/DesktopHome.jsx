@@ -1,9 +1,10 @@
 import { useMemo, useState, useRef } from 'react';
 import { createPlaylist, uploadArtistImage } from '../api/client';
+import GridCard, { HorizontalCard, SectionHeader } from '../components/GridCard';
 
 export default function DesktopHome({
   songs, analytics, playlists, artists,
-  onPlay, addToQueue, onRefreshPlaylists, setView,
+  onPlay, addToQueue, onRefreshPlaylists,
   onOpenPlaylist, onOpenArtist, refreshArtists,
   imgVersion, bumpImgVersion,
 }) {
@@ -47,66 +48,70 @@ export default function DesktopHome({
     e.target.value = '';
   };
 
+  const greeting = () => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good Morning';
+    if (h < 18) return 'Good Afternoon';
+    return 'Good Evening';
+  };
+
   return (
-    <div className="dpage">
+    <div className="home-page">
       <input type="file" ref={artistInputRef} accept="image/*" style={{ display: 'none' }} onChange={handleArtistImageFile} />
-      <h2>Home</h2>
 
-      <section className="dpage__section">
-        <h3>Recently Played</h3>
-        {recentlyPlayed.length === 0 && <p className="muted">No plays yet</p>}
-        <div className="dcard-grid">
-          {recentlyPlayed.map((s) => (
-            <button key={s.id} className="dcard" onClick={() => onPlay(s)}>
-              <div className="dcard__img">
-                {s.cover_url ? <img src={`/api${s.cover_url}${iv}`} alt="" /> : <div className="dcard__img-blank">♪</div>}
-              </div>
-              <div className="dcard__title">{s.title}</div>
-              <div className="dcard__sub">{s.artist || 'Unknown'}</div>
-            </button>
+      <h1 className="home-page__greeting">{greeting()}</h1>
+
+      {recentlyPlayed.length > 0 && (
+        <div className="home-page__top-tracks">
+          {recentlyPlayed.slice(0, 8).map((s) => (
+            <HorizontalCard key={s.id}
+              imgSrc={s.cover_url ? `/api${s.cover_url}${iv}` : null}
+              title={s.title}
+              onClick={() => onPlay(s)}
+              onPlay={() => onPlay(s)}
+            />
           ))}
         </div>
-      </section>
+      )}
 
-      <section className="dpage__section">
-        <h3>Artists</h3>
-        {artists.length === 0 && <p className="muted">No artists yet</p>}
-        <div className="dcard-grid">
-          {artists.map((a) => (
-            <div key={a.name} className="dcard dcard--round" style={{ cursor: 'pointer' }}
-              onClick={() => onOpenArtist?.(a.name)}>
-              <div className="dcard__img dcard__img--round">
-                {a.image_url ? <img src={`/api${a.image_url}${iv}`} alt="" /> : <div className="dcard__img-blank">🎤</div>}
-              </div>
-              <div className="dcard__title">{a.name}</div>
-              <div className="dcard__sub">
-                {a.song_count} song{a.song_count !== 1 ? 's' : ''}
-                {!a.image_url && (
-                  <span style={{ fontSize: '.65rem', marginLeft: '.3rem', textDecoration: 'underline' }}
-                    onClick={(e) => { e.stopPropagation(); handleArtistImageClick(a.name); }}>(add image)</span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
+      {recentlyPlayed.length === 0 && (
+        <section className="home-page__section">
+          <SectionHeader title="Recently Played" />
+          <p className="muted">No plays yet</p>
+        </section>
+      )}
 
-      <section className="dpage__section">
-        <div className="dpage__section-header"><h3>Playlists</h3></div>
-        <div className="dcard-grid">
+      {artists.length > 0 && (
+        <section className="home-page__section">
+          <SectionHeader title="Artists" />
+          <div className="home-page__grid">
+            {artists.map((a) => (
+              <GridCard key={a.name}
+                imgSrc={a.image_url ? `/api${a.image_url}${iv}` : null}
+                title={a.name}
+                subtitle={`${a.song_count} song${a.song_count !== 1 ? 's' : ''}`}
+                round
+                onClick={() => onOpenArtist?.(a.name)}
+                placeholder="🎤"
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="home-page__section">
+        <SectionHeader title="Playlists" />
+        <div className="home-page__grid">
           {userPlaylists.map((p) => (
-            <button key={p.id} className="dcard" onClick={() => onOpenPlaylist(p.id)}>
-              <div className="dcard__img">
-                {p.cover_url ? <img src={`/api${p.cover_url}${iv}`} alt="" /> : <div className="dcard__img-blank">♪</div>}
-              </div>
-              <div className="dcard__title">{p.name}</div>
-              <div className="dcard__sub">{p.song_count} song{p.song_count !== 1 ? 's' : ''}</div>
-            </button>
+            <GridCard key={p.id}
+              imgSrc={p.cover_url ? `/api${p.cover_url}${iv}` : null}
+              title={p.name}
+              subtitle={`${p.song_count} song${p.song_count !== 1 ? 's' : ''}`}
+              onClick={() => onOpenPlaylist(p.id)}
+            />
           ))}
-          <button className="dcard dcard--add" onClick={() => setShowNewPlaylist(true)}>
-            <div className="dcard__img"><div className="dcard__img-blank">+</div></div>
-            <div className="dcard__title">New Playlist</div>
-          </button>
+          <GridCard title="New Playlist" dashed placeholder="+"
+            onClick={() => setShowNewPlaylist(true)} />
         </div>
         {showNewPlaylist && (
           <div className="inline-form" style={{ marginTop: '.5rem' }}>
@@ -119,34 +124,35 @@ export default function DesktopHome({
       </section>
 
       {wrappedPlaylists.length > 0 && (
-        <section className="dpage__section">
-          <div className="dpage__section-header"><h3>Wrapped</h3></div>
-          <div className="dcard-grid">
+        <section className="home-page__section">
+          <SectionHeader title="Wrapped" />
+          <div className="home-page__grid">
             {wrappedPlaylists.map((p) => (
-              <button key={p.id} className="dcard" onClick={() => onOpenPlaylist(p.id)}>
-                <div className="dcard__img">
-                  {p.cover_url ? <img src={`/api${p.cover_url}${iv}`} alt="" /> : <div className="dcard__img-blank">🎁</div>}
-                </div>
-                <div className="dcard__title">{p.name}</div>
-                <div className="dcard__sub">{p.song_count} song{p.song_count !== 1 ? 's' : ''}</div>
-              </button>
+              <GridCard key={p.id}
+                imgSrc={p.cover_url ? `/api${p.cover_url}${iv}` : null}
+                title={p.name}
+                subtitle={`${p.song_count} song${p.song_count !== 1 ? 's' : ''}`}
+                onClick={() => onOpenPlaylist(p.id)}
+                placeholder="🎁"
+              />
             ))}
           </div>
         </section>
       )}
 
       {recommendations.length > 0 && (
-        <section className="dpage__section">
-          <h3>Recommended</h3>
-          <div className="dcard-grid">
+        <section className="home-page__section">
+          <SectionHeader title="Recommended" />
+          <div className="home-page__grid">
             {recommendations.map((r) => (
-              <button key={r.id} className="dcard" onClick={() => { const s = songs.find(x => x.id === r.id); if (s) onPlay(s); }}>
-                <div className="dcard__img">
-                  {r.cover_url ? <img src={`/api${r.cover_url}${iv}`} alt="" /> : <div className="dcard__img-blank">★</div>}
-                </div>
-                <div className="dcard__title">{r.title}</div>
-                <div className="dcard__sub">{r.artist || 'Unknown'}</div>
-              </button>
+              <GridCard key={r.id}
+                imgSrc={r.cover_url ? `/api${r.cover_url}${iv}` : null}
+                title={r.title}
+                subtitle={r.artist || 'Unknown'}
+                onClick={() => { const s = songs.find(x => x.id === r.id); if (s) onPlay(s); }}
+                onPlay={() => { const s = songs.find(x => x.id === r.id); if (s) onPlay(s); }}
+                placeholder="★"
+              />
             ))}
           </div>
         </section>

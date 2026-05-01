@@ -45,7 +45,7 @@ export default function DesktopAnalytics({ analytics }) {
     date: h.date, plays: h.plays, minutes: Math.round((h.total_time || 0) / 60),
   }));
 
-  const ct = { text: '#8b8d9a', grid: '#2d3142', bar: '#6c63ff', bar2: '#22c55e', line: '#6c63ff' };
+  const ct = { text: '#b3b3b3', grid: 'rgba(255,255,255,0.1)', bar: '#1db954', bar2: '#1ed760', line: '#1db954' };
 
   const years = [];
   for (let y = currentYear; y >= currentYear - 5; y--) years.push(y);
@@ -74,7 +74,7 @@ export default function DesktopAnalytics({ analytics }) {
                 <CartesianGrid stroke={ct.grid} strokeDasharray="3 3" />
                 <XAxis dataKey="date" tick={{ fill: ct.text, fontSize: 11 }} />
                 <YAxis tick={{ fill: ct.text, fontSize: 11 }} />
-                <Tooltip contentStyle={{ background: '#1a1d27', border: '1px solid #2d3142', borderRadius: 8, color: '#e8e8ed' }} />
+                <Tooltip contentStyle={{ background: '#282828', border: 'none', borderRadius: 8, color: '#fff' }} />
                 <Line type="monotone" dataKey="plays" stroke={ct.line} strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
@@ -90,7 +90,7 @@ export default function DesktopAnalytics({ analytics }) {
               <BarChart data={songChartData} layout="vertical" margin={{ left: 100 }}>
                 <XAxis type="number" tick={{ fill: ct.text, fontSize: 11 }} />
                 <YAxis type="category" dataKey="name" tick={{ fill: ct.text, fontSize: 11 }} width={100} />
-                <Tooltip contentStyle={{ background: '#1a1d27', border: '1px solid #2d3142', borderRadius: 8, color: '#e8e8ed' }} />
+                <Tooltip contentStyle={{ background: '#282828', border: 'none', borderRadius: 8, color: '#fff' }} />
                 <Bar dataKey="plays" fill={ct.bar} radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -106,7 +106,7 @@ export default function DesktopAnalytics({ analytics }) {
               <BarChart data={artistChartData} layout="vertical" margin={{ left: 100 }}>
                 <XAxis type="number" tick={{ fill: ct.text, fontSize: 11 }} />
                 <YAxis type="category" dataKey="name" tick={{ fill: ct.text, fontSize: 11 }} width={100} />
-                <Tooltip contentStyle={{ background: '#1a1d27', border: '1px solid #2d3142', borderRadius: 8, color: '#e8e8ed' }} />
+                <Tooltip contentStyle={{ background: '#282828', border: 'none', borderRadius: 8, color: '#fff' }} />
                 <Bar dataKey="time" fill={ct.bar2} radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -142,7 +142,7 @@ export default function DesktopAnalytics({ analytics }) {
                   }))} layout="vertical" margin={{ left: 100 }}>
                     <XAxis type="number" tick={{ fill: ct.text, fontSize: 11 }} />
                     <YAxis type="category" dataKey="name" tick={{ fill: ct.text, fontSize: 11 }} width={100} />
-                    <Tooltip contentStyle={{ background: '#1a1d27', border: '1px solid #2d3142', borderRadius: 8, color: '#e8e8ed' }} />
+                    <Tooltip contentStyle={{ background: '#282828', border: 'none', borderRadius: 8, color: '#fff' }} />
                     <Bar dataKey="plays" fill="#ff5500" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>

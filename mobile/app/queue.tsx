@@ -96,7 +96,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
-    borderBottomWidth: 1, borderBottomColor: Colors.border,
+    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.07)',
   },
   headerTitle: { fontSize: FontSize.lg, fontWeight: '700', color: Colors.text },
   body: { flex: 1, padding: Spacing.md },
@@ -112,7 +112,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.sm,
   },
   historyItem: { opacity: 0.5 },
-  currentItem: { backgroundColor: Colors.surface2 },
+  currentItem: { backgroundColor: 'rgba(255,255,255,0.1)' },
   itemInfo: { flex: 1, minWidth: 0 },
   itemTitle: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.text },
   itemArtist: { fontSize: 11, color: Colors.textMuted },

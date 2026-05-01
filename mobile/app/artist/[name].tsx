@@ -1,14 +1,21 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import {
+  View, Text, TouchableOpacity, ScrollView, StyleSheet,
+  Dimensions, FlatList,
+} from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import CoverImage from '../../components/CoverImage';
 import { useData } from '../../contexts/DataContext';
 import { usePlayer } from '../../contexts/PlayerContext';
 import { uploadArtistImage } from '../../api/client';
 import { Colors, Spacing, FontSize, Radius } from '../../constants/theme';
+
+const SCREEN_W = Dimensions.get('window').width;
+const HERO_H = SCREEN_W * 1.0;
 
 export default function ArtistScreen() {
   const { name: rawName } = useLocalSearchParams<{ name: string }>();
@@ -17,15 +24,35 @@ export default function ArtistScreen() {
   const dataCtx = useData();
   const songs = dataCtx.songs || [];
   const artists = dataCtx.artists || [];
+  const playlists = dataCtx.playlists || [];
   const { imgVersion, refreshArtists, bumpImgVersion } = dataCtx;
   const { playSong, addToQueue } = usePlayer();
   const [uploading, setUploading] = useState(false);
+  const [showAllTracks, setShowAllTracks] = useState(false);
 
   const artist = artists.find((a: any) => a.name === artistName);
   const artistSongs = useMemo(
     () => songs.filter(s => s.artist === artistName),
     [songs, artistName],
   );
+
+  const albumGroups = useMemo(() => {
+    const map = new Map<string, any[]>();
+    artistSongs.forEach(s => {
+      const key = s.album || 'Singles';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(s);
+    });
+    return Array.from(map.entries()).map(([album, tracks]) => ({
+      album, tracks, cover: tracks[0]?.cover_url,
+    }));
+  }, [artistSongs]);
+
+  const popularTracks = useMemo(() => {
+    return [...artistSongs]
+      .sort((a, b) => (b.play_count || 0) - (a.play_count || 0))
+      .slice(0, showAllTracks ? 20 : 5);
+  }, [artistSongs, showAllTracks]);
 
   const handleImageUpload = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -49,58 +76,101 @@ export default function ArtistScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.headerBar}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="chevron-back" size={24} color={Colors.text} />
-        </TouchableOpacity>
-      </View>
-
+    <SafeAreaView style={styles.safeArea} edges={['bottom']}>
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-        <View style={styles.hero}>
-          <TouchableOpacity onPress={handleImageUpload}>
-            <CoverImage coverUrl={artist?.image_url} size={120} round
-              placeholder="\uD83C\uDFA4" imgVersion={imgVersion} />
-            {uploading && (
-              <View style={styles.uploadOverlay}>
-                <Text style={styles.uploadText}>...</Text>
+        {/* Hero */}
+        <TouchableOpacity activeOpacity={0.9} onPress={handleImageUpload}>
+          <View style={styles.heroWrap}>
+            {artist?.image_url ? (
+              <CoverImage coverUrl={artist.image_url} size={SCREEN_W}
+                imgVersion={imgVersion} style={styles.heroImage} />
+            ) : (
+              <View style={[styles.heroImage, styles.heroPlaceholder]}>
+                <Ionicons name="person" size={80} color={Colors.textMuted} />
               </View>
             )}
-          </TouchableOpacity>
-          <View style={styles.meta}>
-            <Text style={styles.name}>{artistName}</Text>
-            <Text style={styles.stats}>
-              {artistSongs.length} track{artistSongs.length !== 1 ? 's' : ''}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.actions}>
-          <TouchableOpacity style={styles.playAllBtn} onPress={handlePlayAll}
-            disabled={artistSongs.length === 0}>
-            <Ionicons name="play" size={18} color={Colors.white} />
-            <Text style={styles.playAllText}>Play All</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.songList}>
-          {artistSongs.map((song) => (
-            <TouchableOpacity key={song.id} style={styles.songRow}
-              onPress={() => playSong(song, artistSongs)}>
-              <CoverImage coverUrl={song.cover_url} size={44} imgVersion={imgVersion} />
-              <View style={styles.songInfo}>
-                <Text style={styles.songTitle} numberOfLines={1}>{song.title}</Text>
-                <Text style={styles.songArtist} numberOfLines={1}>{song.album || 'Unknown Album'}</Text>
-              </View>
-              <TouchableOpacity onPress={() => addToQueue(song)} style={styles.actionBtn}>
-                <Ionicons name="list" size={16} color={Colors.textMuted} />
+            <LinearGradient colors={['transparent', 'transparent', 'rgba(0,0,0,0.6)', Colors.bg]}
+              locations={[0, 0.35, 0.7, 1]}
+              style={styles.heroOverlay} />
+            <View style={styles.heroContent}>
+              <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+                <Ionicons name="chevron-back" size={24} color={Colors.text} />
               </TouchableOpacity>
-            </TouchableOpacity>
-          ))}
-          {artistSongs.length === 0 && (
-            <Text style={[styles.muted, { textAlign: 'center', marginTop: 20 }]}>No songs by this artist</Text>
-          )}
+              <View style={styles.heroBottom}>
+                <Text style={styles.heroName}>{artistName}</Text>
+                <Text style={styles.heroStat}>
+                  {artistSongs.length} track{artistSongs.length !== 1 ? 's' : ''}
+                </Text>
+              </View>
+            </View>
+            {uploading && (
+              <View style={styles.uploadBanner}>
+                <Text style={styles.uploadText}>Uploading image...</Text>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+
+        {/* Controls */}
+        <View style={styles.controlsRow}>
+          <TouchableOpacity style={styles.fabPlay} onPress={handlePlayAll}
+            disabled={artistSongs.length === 0}>
+            <Ionicons name="play" size={28} color="#000" />
+          </TouchableOpacity>
         </View>
+
+        {/* Popular Tracks */}
+        {popularTracks.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Popular</Text>
+            {popularTracks.map((song, idx) => (
+              <TouchableOpacity key={song.id} style={styles.songRow}
+                onPress={() => playSong(song, artistSongs)}>
+                <Text style={styles.trackNum}>{idx + 1}</Text>
+                <CoverImage coverUrl={song.cover_url} size={44} imgVersion={imgVersion} />
+                <View style={styles.songInfo}>
+                  <Text style={styles.songTitle} numberOfLines={1}>{song.title}</Text>
+                  <Text style={styles.songArtist} numberOfLines={1}>
+                    {song.play_count ? `${song.play_count} plays` : song.album || 'Unknown'}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => addToQueue(song)} style={styles.moreBtn}>
+                  <Ionicons name="ellipsis-horizontal" size={18} color={Colors.textMuted} />
+                </TouchableOpacity>
+              </TouchableOpacity>
+            ))}
+            {artistSongs.length > 5 && (
+              <TouchableOpacity style={styles.showMoreBtn}
+                onPress={() => setShowAllTracks(!showAllTracks)}>
+                <Text style={styles.showMoreText}>
+                  {showAllTracks ? 'Show less' : `Show all ${artistSongs.length} tracks`}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* From This Artist - Album Groups */}
+        {albumGroups.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>From this artist</Text>
+            <FlatList horizontal data={albumGroups} showsHorizontalScrollIndicator={false}
+              keyExtractor={(item) => item.album}
+              contentContainerStyle={{ paddingHorizontal: Spacing.lg, gap: Spacing.md }}
+              renderItem={({ item }) => (
+                <TouchableOpacity style={styles.albumCard}
+                  onPress={() => {
+                    if (item.tracks.length > 0) playSong(item.tracks[0], item.tracks);
+                  }}>
+                  <View style={styles.albumCoverWrap}>
+                    <CoverImage coverUrl={item.cover} size={140} imgVersion={imgVersion} />
+                  </View>
+                  <Text style={styles.albumTitle} numberOfLines={1}>{item.album}</Text>
+                  <Text style={styles.albumSub}>{item.tracks.length} songs</Text>
+                </TouchableOpacity>
+              )} />
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -108,37 +178,59 @@ export default function ArtistScreen() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: Colors.bg },
-  headerBar: { padding: Spacing.md },
-  hero: { flexDirection: 'row', alignItems: 'center', gap: Spacing.lg, paddingHorizontal: Spacing.lg, paddingBottom: Spacing.lg },
-  meta: { flex: 1 },
-  name: { fontSize: FontSize.xl, fontWeight: '700', color: Colors.text, marginBottom: Spacing.xs },
-  stats: { fontSize: FontSize.sm, color: Colors.textMuted },
-  uploadOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 60,
-    alignItems: 'center',
-    justifyContent: 'center',
+  heroWrap: { width: SCREEN_W, height: HERO_H, position: 'relative' },
+  heroImage: { width: SCREEN_W, height: HERO_H, resizeMode: 'cover' as any },
+  heroPlaceholder: {
+    backgroundColor: Colors.surface2,
+    alignItems: 'center', justifyContent: 'center',
   },
-  uploadText: { color: Colors.white, fontSize: FontSize.lg },
-  actions: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
-    paddingHorizontal: Spacing.lg, paddingBottom: Spacing.lg,
+  heroOverlay: {
+    position: 'absolute', left: 0, right: 0, bottom: 0, height: HERO_H,
   },
-  playAllBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
-    backgroundColor: Colors.accent, borderRadius: Radius.md,
-    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm,
+  heroContent: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    justifyContent: 'space-between',
   },
-  playAllText: { color: Colors.white, fontWeight: '600', fontSize: FontSize.md },
-  songList: { paddingHorizontal: Spacing.lg },
+  backBtn: { padding: Spacing.lg, paddingTop: 48 },
+  heroBottom: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
+  heroName: { fontSize: 42, fontWeight: '900', color: Colors.text },
+  heroStat: { fontSize: FontSize.sm, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
+  uploadBanner: {
+    position: 'absolute', top: 48, right: Spacing.lg,
+    backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs,
+  },
+  uploadText: { color: Colors.text, fontSize: FontSize.xs },
+  controlsRow: {
+    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
+  },
+  fabPlay: {
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: Colors.accent,
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, shadowRadius: 8, elevation: 6,
+  },
+  section: { marginBottom: Spacing.xl },
+  sectionTitle: {
+    fontSize: FontSize.lg, fontWeight: '700', color: Colors.text,
+    paddingHorizontal: Spacing.lg, marginBottom: Spacing.md,
+  },
   songRow: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
-    paddingVertical: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.border,
+    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm,
+  },
+  trackNum: {
+    width: 24, fontSize: FontSize.md, color: Colors.textMuted, textAlign: 'center',
   },
   songInfo: { flex: 1, minWidth: 0 },
-  songTitle: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.text },
+  songTitle: { fontSize: FontSize.md, fontWeight: '500', color: Colors.text },
   songArtist: { fontSize: 11, color: Colors.textMuted },
-  actionBtn: { padding: Spacing.xs },
-  muted: { color: Colors.textMuted, fontSize: FontSize.sm },
+  moreBtn: { padding: Spacing.sm },
+  showMoreBtn: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm },
+  showMoreText: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.textMuted },
+  albumCard: { width: 140 },
+  albumCoverWrap: { borderRadius: Radius.sm, overflow: 'hidden', marginBottom: Spacing.sm },
+  albumTitle: { fontSize: FontSize.sm, fontWeight: '600', color: Colors.text },
+  albumSub: { fontSize: 11, color: Colors.textMuted },
 });

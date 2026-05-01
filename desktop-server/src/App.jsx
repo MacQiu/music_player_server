@@ -2,23 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { getSongs, getAnalytics, getPlaylists, getArtists, ping, getDownloadUrl, postPlaylog } from './api/client';
 
 import DesktopLayout from './components/DesktopLayout';
-import Player from './components/Player';
-import MobilePlayerOverlay from './components/MobilePlayerOverlay';
-import MobileQueueOverlay from './components/MobileQueueOverlay';
-import PlaylistOverlay from './components/PlaylistOverlay';
-import ArtistOverlay from './components/ArtistOverlay';
-import Home from './pages/Home';
-import Library from './pages/Library';
-import Analytics from './pages/Analytics';
-import Sync from './pages/Sync';
 
-const MOBILE_TABS = ['Home', 'Library', 'Analytics', 'Sync'];
 const STORAGE_KEY = 'mp_resume';
 
 export default function App() {
-  const [mode, setMode] = useState('desktop');
-  const [tab, setTab] = useState('Home');
-
   const [songs, setSongs] = useState([]);
   const [analytics, setAnalytics] = useState(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
@@ -50,8 +37,6 @@ export default function App() {
   const originalSourceRef = useRef(null);
 
   // Overlay states
-  const [showMobileOverlay, setShowMobileOverlay] = useState(false);
-  const [showMobileQueue, setShowMobileQueue] = useState(false);
   const [openPlaylistId, setOpenPlaylistId] = useState(null);
   const [openArtistName, setOpenArtistName] = useState(null);
   const [imgVersion, setImgVersion] = useState(0);
@@ -312,25 +297,6 @@ export default function App() {
 
   // ---- Render ----
 
-  const renderMobileTab = () => {
-    switch (tab) {
-      case 'Home':
-        return <Home songs={songs} analytics={analytics} playlists={playlists} artists={artists}
-          onPlay={song => playSong(song, songs)} onRefreshPlaylists={refreshPlaylists}
-          addToQueue={addToQueue} onOpenPlaylist={setOpenPlaylistId} onOpenArtist={setOpenArtistName}
-          refreshArtists={refreshArtists} imgVersion={imgVersion} bumpImgVersion={bumpImgVersion} />;
-      case 'Library':
-        return <Library songs={songs} onPlay={song => playSong(song, songs)}
-          addToQueue={addToQueue} playlists={playlists} refreshSongs={refreshSongs}
-          imgVersion={imgVersion} bumpImgVersion={bumpImgVersion} />;
-      case 'Analytics':
-        return <Analytics analytics={analytics} loading={analyticsLoading} />;
-      case 'Sync':
-        return <Sync online={online} onRefreshSongs={d => setSongs(d)} />;
-      default: return null;
-    }
-  };
-
   return (
     <div className="app">
       <audio
@@ -343,64 +309,19 @@ export default function App() {
         onPause={() => setPlaying(false)}
       />
 
-      <header className="app-header">
-        <h1 className="app-header__title">KillerTunes</h1>
-        <div className="mode-toggle">
-          <button className={`btn ${mode === 'mobile' ? 'btn--active' : ''}`} onClick={() => setMode('mobile')}>Mobile</button>
-          <button className={`btn ${mode === 'desktop' ? 'btn--active' : ''}`} onClick={() => setMode('desktop')}>Desktop</button>
-        </div>
-      </header>
-
       {error && <div className="error-banner">{error}</div>}
 
-      {mode === 'mobile' ? (
-        <div className="phone-frame">
-          <div className="phone-frame__screen">
-            <div className="phone-frame__content">{renderMobileTab()}</div>
-            <div onClick={() => currentSong && setShowMobileOverlay(true)}>
-              <Player song={currentSong} {...audioProps} />
-            </div>
-            <nav className="tab-bar">
-              {MOBILE_TABS.map(t => (
-                <button key={t} className={`tab-bar__item ${tab === t ? 'tab-bar__item--active' : ''}`} onClick={() => setTab(t)}>{t}</button>
-              ))}
-            </nav>
-
-            {showMobileOverlay && currentSong && (
-              <MobilePlayerOverlay song={currentSong} onClose={() => setShowMobileOverlay(false)}
-                onShowQueue={() => setShowMobileQueue(true)} audioRef={audioRef} {...audioProps} {...queueProps} />
-            )}
-            {showMobileQueue && <MobileQueueOverlay onClose={() => setShowMobileQueue(false)} {...queueProps} />}
-            {openPlaylistId && (
-              <div style={{ position: 'absolute', inset: 0, zIndex: 85 }}>
-                <PlaylistOverlay playlistId={openPlaylistId} onClose={() => setOpenPlaylistId(null)}
-                  songs={songs} playSong={playSong} addToQueue={addToQueue}
-                  refreshPlaylists={refreshPlaylists} refreshSongs={refreshSongs} />
-              </div>
-            )}
-            {openArtistName && (
-              <div style={{ position: 'absolute', inset: 0, zIndex: 85 }}>
-                <ArtistOverlay artistName={openArtistName} songs={songs} artists={artists}
-                  onClose={() => setOpenArtistName(null)} playSong={playSong}
-                  addToQueue={addToQueue} refreshArtists={refreshArtists}
-                  imgVersion={imgVersion} />
-              </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        <DesktopLayout
-          songs={songs} analytics={analytics} playlists={playlists} artists={artists} online={online}
-          onRefreshSongs={d => setSongs(d)} onRefreshAnalytics={refreshAnalytics}
-          onRefreshPlaylists={refreshPlaylists} onRefreshArtists={refreshArtists}
-          refreshSongs={refreshSongs} refreshArtists={refreshArtists}
-          openPlaylistId={openPlaylistId} setOpenPlaylistId={setOpenPlaylistId}
-          openArtistName={openArtistName} setOpenArtistName={setOpenArtistName}
-          imgVersion={imgVersion} bumpImgVersion={bumpImgVersion}
-          audioRef={audioRef}
-          {...audioProps} {...queueProps}
-        />
-      )}
+      <DesktopLayout
+        songs={songs} analytics={analytics} playlists={playlists} artists={artists} online={online}
+        onRefreshSongs={d => setSongs(d)} onRefreshAnalytics={refreshAnalytics}
+        onRefreshPlaylists={refreshPlaylists} onRefreshArtists={refreshArtists}
+        refreshSongs={refreshSongs} refreshArtists={refreshArtists}
+        openPlaylistId={openPlaylistId} setOpenPlaylistId={setOpenPlaylistId}
+        openArtistName={openArtistName} setOpenArtistName={setOpenArtistName}
+        imgVersion={imgVersion} bumpImgVersion={bumpImgVersion}
+        audioRef={audioRef}
+        {...audioProps} {...queueProps}
+      />
     </div>
   );
 }

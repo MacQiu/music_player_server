@@ -67,9 +67,11 @@ CREATE TABLE IF NOT EXISTS playlist_songs (
 );
 
 CREATE TABLE IF NOT EXISTS artists (
-    name        TEXT PRIMARY KEY,
-    image_path  TEXT,
-    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    name                TEXT PRIMARY KEY,
+    image_path          TEXT,
+    image_position      TEXT DEFAULT 'center 30%',
+    image_position_mobile TEXT DEFAULT 'center center',
+    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS lyric_sets (
@@ -249,6 +251,15 @@ def init_db() -> None:
         _migrate_lyrics_to_sets(conn)
         # Rename lyrics dirs/files to human-readable names.
         _migrate_lyrics_readable_names(conn)
+        # Migrate existing DBs that lack artist image_position columns.
+        try:
+            conn.execute("SELECT image_position FROM artists LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute("ALTER TABLE artists ADD COLUMN image_position TEXT DEFAULT 'center 30%'")
+        try:
+            conn.execute("SELECT image_position_mobile FROM artists LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute("ALTER TABLE artists ADD COLUMN image_position_mobile TEXT DEFAULT 'center center'")
         conn.commit()
 
 

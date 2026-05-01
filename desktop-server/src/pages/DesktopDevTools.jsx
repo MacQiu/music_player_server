@@ -43,7 +43,7 @@ export default function DesktopDevTools({ songs, onRefreshAnalytics, onRefreshPl
     return parts.join(' ');
   };
 
-  const ct = { text: '#8b8d9a', bar: '#ff5500' };
+  const ct = { text: '#b3b3b3', bar: '#1db954' };
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -172,7 +172,7 @@ export default function DesktopDevTools({ songs, onRefreshAnalytics, onRefreshPl
                   }))} layout="vertical" margin={{ left: 100 }}>
                     <XAxis type="number" tick={{ fill: ct.text, fontSize: 11 }} />
                     <YAxis type="category" dataKey="name" tick={{ fill: ct.text, fontSize: 11 }} width={100} />
-                    <Tooltip contentStyle={{ background: '#1a1d27', border: '1px solid #2d3142', borderRadius: 8, color: '#e8e8ed' }} />
+                    <Tooltip contentStyle={{ background: '#282828', border: 'none', borderRadius: 8, color: '#fff' }} />
                     <Bar dataKey="plays" fill={ct.bar} radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
