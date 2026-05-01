@@ -32,12 +32,12 @@ async function saveQueue(queue: PlaylogEntry[]): Promise<void> {
   await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
 }
 
-export async function enqueueLog(songId: string, duration: number): Promise<void> {
+export async function enqueueLog(songId: string, duration: number, timestamp?: string): Promise<void> {
   const entry: PlaylogEntry = {
     id: generateId(),
     song_id: songId,
     duration,
-    timestamp: new Date().toISOString(),
+    timestamp: timestamp || new Date().toISOString(),
   };
   const queue = await getQueue();
   queue.push(entry);
