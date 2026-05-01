@@ -280,6 +280,17 @@ section { margin-bottom: 1.5rem; }
   display: flex;
 }
 
+.sidebar-wrapper {
+  width: 300px;
+  flex-shrink: 0;
+  height: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.sidebar-wrapper--collapsed {
+  width: 72px;
+}
+
 .desktop__main {
   flex: 1;
   overflow-y: auto;
@@ -298,15 +309,6 @@ section { margin-bottom: 1.5rem; }
   height: 100%;
 }
 
-.resize-handle {
-  width: 4px;
-  background: transparent;
-  transition: background .15s;
-  cursor: col-resize;
-  border-radius: 2px;
-  margin: 8px 0;
-}
-.resize-handle:hover { background: hsla(0,0%,100%,.15); }
 
 /* ============================
    Sidebar (Spotify-style library)

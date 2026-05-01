@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import Sidebar from './Sidebar';
 import DesktopPlayer from './DesktopPlayer';
 import UploadModal from './UploadModal';
@@ -41,9 +40,12 @@ export default function DesktopLayout({
   const viewRef = useRef(view);
   viewRef.current = view;
 
+  const isDetailPage = (page) => page === 'playlist' || page === 'artist';
+
   const navigate = useCallback((newView) => {
     const prev = viewRef.current;
-    if (prev.page !== newView.page) {
+    const bothDetail = isDetailPage(prev.page) && isDetailPage(newView.page);
+    if (!bothDetail && prev.page !== newView.page) {
       setViewHistory(h => [...h, prev]);
     }
     setView(newView);
@@ -201,35 +203,24 @@ export default function DesktopLayout({
       </div>
 
       <div className="desktop__body">
-        <PanelGroup orientation="horizontal" style={{ flex: 1 }}>
-          <Panel
-            id="left"
-            defaultSize={sidebarCollapsed ? 72 : "16%"}
-            minSize={sidebarCollapsed ? 72 : 250}
-            maxSize={sidebarCollapsed ? 72 : "28%"}
-          >
-            <Sidebar
-              view={view} navigateTo={navigateTo}
-              playlists={playlists} artists={artists} songs={songs}
-              onRefreshPlaylists={onRefreshPlaylists}
-              onOpenPlaylist={handleOpenPlaylist}
-              onOpenArtist={handleOpenArtist}
-              devMode={devMode}
-              collapsed={sidebarCollapsed}
-              onToggleCollapse={() => setSidebarCollapsed(v => !v)}
-              imgVersion={imgVersion}
-              currentSong={currentSong}
-            />
-          </Panel>
+        <div className={`sidebar-wrapper ${sidebarCollapsed ? 'sidebar-wrapper--collapsed' : ''}`}>
+          <Sidebar
+            view={view} navigateTo={navigateTo}
+            playlists={playlists} artists={artists} songs={songs}
+            onRefreshPlaylists={onRefreshPlaylists}
+            onOpenPlaylist={handleOpenPlaylist}
+            onOpenArtist={handleOpenArtist}
+            devMode={devMode}
+            collapsed={sidebarCollapsed}
+            onToggleCollapse={() => setSidebarCollapsed(v => !v)}
+            imgVersion={imgVersion}
+            currentSong={currentSong}
+          />
+        </div>
 
-          <PanelResizeHandle className="resize-handle" />
-
-          <Panel id="center" minSize="30%">
-            <main className="desktop__main" ref={mainRef}>
-              {renderMain()}
-            </main>
-          </Panel>
-        </PanelGroup>
+        <main className="desktop__main" ref={mainRef}>
+          {renderMain()}
+        </main>
 
         {rightPanel && (
           <div className="right-panel-wrapper">
