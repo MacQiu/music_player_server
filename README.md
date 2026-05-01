@@ -1,12 +1,13 @@
 # Music Player Server
 
-A local-first Flask backend + React web UI for a personal music player.
+A local-first Flask backend + React desktop UI + Expo mobile app for a
+personal music player. The desktop server (`desktop-server/`) is the central
+hub for uploading songs, managing lyrics, and tracking statistics. The mobile
+app (`mobile/`) connects to the server for syncing and can store songs locally
+for offline playback.
+
 Desktop UI is Spotify-inspired (sidebar, bottom player bar, queue, lyrics).
 Mobile UI is SoundCloud-inspired (overlay player, swipe controls, simplified sync).
-
-Stores a music library on your machine, serves audio over WiFi, tracks
-playback analytics with charts, supports playlists, cover art, and
-offline-first sync from mobile clients.
 
 No external services. SQLite only.
 
@@ -15,41 +16,50 @@ No external services. SQLite only.
 ## Layout
 
 ```
-app.py              # Flask app + all routes
-db.py               # SQLite connection + schema + idempotent upsert
-utils.py            # filename safety, UUIDs, mutagen metadata
+app.py                # Flask app + all routes
+db.py                 # SQLite connection + schema + idempotent upsert
+utils.py              # filename safety, UUIDs, mutagen metadata
 requirements.txt
 data/
-  music.db          # created on first run
+  music.db            # created on first run
 storage/
-  songs/            # uploaded audio files (Title - Artist.ext naming)
-  covers/           # song cover images (content-hash naming for dedup)
-  artists/          # artist profile images
-  lyrics/           # per-song directories with lyric sets and color maps
+  songs/              # uploaded audio files (Title - Artist.ext naming)
+  covers/             # song cover images (content-hash naming for dedup)
+  artists/            # artist profile images
+  lyrics/             # per-song directories with lyric sets and color maps
     Shut Down - BLACKPINK/
       Lyrics - Original.lrc
       Lyrics - Original.colors.json
       Lyrics - Romanized.lrc
       legend.json
-test-ui/            # Vite + React SPA
+desktop-server/       # Vite + React SPA (desktop hub UI)
   src/
-    api/client.js   # API client wrapper
+    api/client.js     # API client wrapper
     constants/
-      colors.js     # Singer color palette (15 colors)
-    components/     # DesktopLayout, Sidebar, DesktopPlayer, Player,
-                    # UploadModal, ServerModal, QueueSidebar, LyricsOverlay,
-                    # LyricsEditor, MobilePlayerOverlay, MobileQueueOverlay,
-                    # PlaylistOverlay, ArtistOverlay
-    pages/          # Home, Library, Analytics, Sync (mobile)
-                    # DesktopHome, DesktopLibrary, DesktopAnalytics,
-                    # DesktopDevTools (desktop)
-    App.jsx         # Root: mode toggle, shared audio, queue state, resume
-    index.css       # All styles
+      colors.js       # Singer color palette (15 colors)
+    components/       # DesktopLayout, Sidebar, DesktopPlayer, Player,
+                      # UploadModal, ServerModal, QueueSidebar, LyricsOverlay,
+                      # LyricsEditor, MobilePlayerOverlay, MobileQueueOverlay,
+                      # PlaylistOverlay, ArtistOverlay
+    pages/            # Home, Library, Analytics, Sync (mobile)
+                      # DesktopHome, DesktopLibrary, DesktopAnalytics,
+                      # DesktopDevTools (desktop)
+    App.jsx           # Root: mode toggle, shared audio, queue state, resume
+    index.css         # All styles
+mobile/               # Expo + React Native app (iOS)
+  app/                # Expo Router file-based routes
+  components/         # MiniPlayer, CoverImage, SongRow
+  contexts/           # PlayerContext, DataContext
+  utils/              # songStorage, playlogQueue, lyricsCache
+  api/client.ts       # Mobile API client (3s timeout)
+  constants/          # theme, colors
 ```
 
 ---
 
 ## Setup
+
+### Backend
 
 ```bash
 python -m venv venv
@@ -60,18 +70,31 @@ source venv/bin/activate
 
 pip install -r requirements.txt
 python app.py
-
-# React UI
-cd test-ui
-npm install
-npm run dev
 ```
 
 Server listens on `http://0.0.0.0:5000`. From another device on the same WiFi,
 use your machine's LAN IP (e.g. `http://192.168.1.42:5000`).
 
+### Desktop UI
+
+```bash
+cd desktop-server
+npm install
+npm run dev
+```
+
 The React dev server runs on `http://localhost:3000` and proxies `/api/*` to
 Flask. To access from a phone on the same network, run `npm run dev -- --host`.
+
+### Mobile App
+
+```bash
+cd mobile
+npm install
+npx expo start
+```
+
+See [`mobile/MOBILE.md`](mobile/MOBILE.md) for full setup instructions.
 
 ---
 
@@ -187,6 +210,10 @@ All responses are JSON. Errors look like `{"error": "..."}`.
 
 ## Desktop UI (Spotify-inspired)
 
+The desktop UI lives in `desktop-server/` and serves as the central hub for
+managing your music library -- uploading songs, editing lyrics, tracking
+statistics, and creating wrapped playlists.
+
 - **Sidebar**: Home, Library, Analytics navigation; playlist list split into
   user playlists and Wrapped playlists; inline create; cloud-upload icon for
   song upload modal; gear icon for server controls modal. Dev Tools nav link
@@ -231,6 +258,10 @@ All responses are JSON. Errors look like `{"error": "..."}`.
 
 ## Mobile UI (SoundCloud-inspired)
 
+The mobile app lives in `mobile/` and is built with Expo + React Native. It
+connects to the desktop server for syncing and can download songs locally
+for offline playback.
+
 - **Home tab**: recently played, artists (tap no-image artists to upload),
   playlists split into user playlists and Wrapped playlists (tap to open
   playlist overlay), recommendations (random 5 from top 15 most played).
@@ -242,23 +273,48 @@ All responses are JSON. Errors look like `{"error": "..."}`.
   with a "Not Downloaded" subtitle.
 - **Analytics tab**: stat cards + recharts charts + yearly wrapped section
 - **Sync tab**: card rows for server status, sync status, fetch songs
-- **Mini player bar**: tappable, shows cover + title + play/pause + progress
-- **Full-screen overlay** (tap mini player): cover art (blurred when paused),
-  prev/play/next controls, seek bar, swipe left/right, shuffle/queue/repeat,
-  lyrics button to open a read-only lyrics overlay.
-  Repeat icon uses SVG with "1" for single-song repeat (SoundCloud style).
+- **Mini player bar**: sits above the tab bar in a custom tab bar layout;
+  tappable, shows cover + title + play/pause + progress strip.
+- **Full-screen player** (tap mini player): cover art with blurred background,
+  close button (down-chevron in black circle, top-right), swipe down to
+  dismiss. Song info, seek bar, prev/play/next controls, and bottom row
+  with shuffle/lyrics/queue/repeat. Repeat icon uses "1" for single-song
+  repeat (SoundCloud style). When playing, the cover image fills the
+  background and pans left-to-right over the song duration; control buttons
+  get translucent dark circles. All buttons maintain fixed dimensions in
+  both play and pause states to prevent layout shift. Dragging the seek bar
+  smoothly drags the panning image in real-time.
 - **Queue overlay**: same section layout as desktop queue
 - **Playlist overlay**: full-screen overlay with same functionality as desktop;
   wrapped playlists are read-only with per-song stats
-- **Lyrics overlay (mobile)**: read-only synced lyrics display with set
-  switching and color rendering; no editing capability on mobile
+- **Lyrics overlay (mobile)**: synced lyrics display with set switching, color
+  rendering, and legend; includes lyrics editor with timestamping on mobile.
+  Lyrics data is memory-cached so reopening the overlay for the same song
+  is instant.
+
+## Font
+
+Both UIs use **Nunito** (Google Fonts) as the global typeface. On desktop, it
+is loaded via a `<link>` tag and set as the primary `--font` CSS variable. On
+mobile, `@expo-google-fonts/nunito` is loaded in the root layout and applied
+globally to all `Text` components via a render override.
 
 ## Shared Audio Architecture
 
+### Desktop
 A single `<audio>` element lives in `App.jsx` and is shared across all UIs.
 The mobile mini player, full-screen overlay, and desktop player bar all
-control the same audio instance via shared state and callbacks. This prevents
-the double-audio bug where multiple audio elements could play simultaneously.
+control the same audio instance via shared state and callbacks.
+
+### Mobile
+A single `expo-audio` `AudioPlayer` instance lives in `PlayerContext.tsx`.
+It is configured for background playback (`shouldPlayInBackground: true`).
+The player resolves local files first (if downloaded) and falls back to
+streaming from the server.
+
+**Background playback** (lock screen / app switch) requires a development
+build -- it does not work in Expo Go. See `mobile/MOBILE.md` for setup
+instructions.
 
 ## Queue Model
 
@@ -276,9 +332,9 @@ the double-audio bug where multiple audio elements could play simultaneously.
 
 ## Resume Playback
 
-On song change, `{ songId, position }` is saved to `localStorage`. When the
-app loads, it restores the last-played song at the saved position in a
-**paused** state -- no auto-play.
+On song change, `{ songId, position }` is saved to `localStorage` (desktop)
+or `AsyncStorage` (mobile). When the app loads, it restores the last-played
+song at the saved position in a **paused** state -- no auto-play.
 
 ## Library Reordering
 
@@ -323,28 +379,60 @@ teal, cyan, blue, navy blue, magenta, purple, violet, peach, light grey.
 Default (unassigned) text is white when active and dim grey when upcoming.
 
 **Color map format** (stored in `colors.json`):
-- Whole line: `{ "0": "magenta" }` (line index → color name)
+- Whole line: `{ "0": "magenta" }` (line index -> color name)
 - Partial line: `{ "1": [{"s": 0, "e": 10, "c": "red"}, {"s": 10, "e": 25, "c": "blue"}] }`
 
 **Legend**: a per-song color-to-singer-name mapping (`legend.json`) that can be
 toggled on as a sidebar panel in the lyrics overlay.
 
-**Editor workflow**:
-1. Click the palette icon on any line
-2. Pick a color, then "Color Whole Line" or select a portion and "Apply to Selection"
-3. Set up the legend via the "Legend" button to map colors to singer names
-4. Save -- lyrics and colors are saved to separate files
+## Local Song Storage (Mobile)
 
-## Selective Download (Mobile)
+Songs can be downloaded to the device's document directory using
+`expo-file-system`. Downloaded songs persist across app relaunches and carry
+over to production iOS builds. The player automatically uses the local copy
+when available, falling back to server streaming.
 
-All songs from the server appear in the mobile library regardless of download
-status. Songs can be marked as "downloaded" or "not downloaded" via the context
-menu. Non-downloaded songs are greyed out with a "Not Downloaded" subtitle but
-can still be played (streaming from server), added to playlists, and reordered.
+Files are stored at: `{documentDirectory}songs/{songId}.{ext}`
 
-This is a server-side flag (`downloaded` column in `songs` table) designed as
-scaffolding for a future native iOS app or Jellyfin integration, where the flag
-will determine which songs to cache locally on the device.
+The library UI shows "Downloading..." during active downloads and "Not
+Downloaded" for songs that are only available via streaming.
+
+## Offline-First Data (Mobile)
+
+The mobile app caches all data locally so it works without the server:
+
+- **Library metadata** (songs, playlists, artists, analytics) is cached in
+  `AsyncStorage` and loaded on app launch before any network call.
+- **Cover images** (song covers, artist images, playlist images) are cached
+  to the local filesystem via `expo-file-system`. The `CoverImage` component
+  checks the `online` flag from `DataContext` and skips server URLs entirely
+  when offline, loading directly from local cache with zero network delay.
+- **Lyrics** (sets, text, colors, legend) are cached to the filesystem in
+  `{documentDirectory}lyrics/{songId}/`. A module-level memory cache in
+  `lyrics.tsx` keeps lyrics in RAM so reopening the overlay is instant.
+  When offline, all server API calls are skipped; data loads from filesystem
+  cache directly.
+- **Player cover images** use a module-level `coverCache` Map so the cover
+  persists across overlay open/close without re-fetching. When offline,
+  the player skips the server URI and resolves from local cache immediately.
+- **Auto-sync on reconnect**: when the app detects the server coming back
+  online (via the 15-second ping interval), it automatically refreshes all
+  data and re-downloads covers/lyrics for all downloaded songs.
+- **Pull-to-refresh**: all tabs (Home, Library, Analytics, Sync) support
+  pull-to-refresh to manually trigger a data refresh.
+- **API timeout**: all server requests use a 3-second `AbortController`
+  timeout so the app fails fast when the server is unreachable.
+
+## Offline Play Log Queue (Mobile)
+
+Play logs are stored in a local AsyncStorage-backed queue
+(`mobile/utils/playlogQueue.ts`) instead of being sent directly to the server.
+Each log entry includes a client-generated UUID for idempotency.
+
+When the server becomes reachable (detected via the 15-second ping interval
+in `DataContext`), the queue is automatically flushed in batches of 50 via
+the `POST /sync` endpoint. This ensures analytics and wrapped stats are
+accurately tracked even when playing locally stored songs offline.
 
 ## Yearly Analytics (Wrapped)
 
@@ -401,3 +489,6 @@ orange repeat-one style).
 - Image containers are sized for high-resolution display across both UIs.
 - Database migrations run automatically on startup (cover dedup, sort_order
   backfill, artist backfill, lyrics directory restructuring, download column).
+- Background audio on mobile requires a development build (not Expo Go).
+- The mobile app is fully functional offline for downloaded songs, including
+  playback, cover images, lyrics, and analytics display.

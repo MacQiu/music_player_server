@@ -34,7 +34,8 @@
         {
           "enableBackgroundPlayback": true
         }
-      ]
+      ],
+      "expo-font"
     ]
   }
 }

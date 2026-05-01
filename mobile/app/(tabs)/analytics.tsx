@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Dimensions, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, Dimensions, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BarChart } from 'react-native-chart-kit';
 import { useData } from '../../contexts/DataContext';
@@ -44,12 +44,24 @@ function StatCard({ value, label }: { value: string | number; label: string }) {
 }
 
 export default function AnalyticsScreen() {
-  const { analytics, analyticsLoading } = useData();
+  const { analytics, analyticsLoading, refreshAnalytics } = useData();
   const currentYear = new Date().getFullYear();
   const [wrappedYear, setWrappedYear] = useState(currentYear);
   const [wrapped, setWrapped] = useState<any>(null);
   const [wrappedLoading, setWrappedLoading] = useState(false);
   const years = Array.from({ length: 6 }, (_, i) => currentYear - i);
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refreshAnalytics();
+    setWrappedLoading(true);
+    try {
+      const data = await getWrappedAnalytics(wrappedYear);
+      setWrapped(data);
+    } catch { setWrapped(null); }
+    finally { setWrappedLoading(false); }
+    setRefreshing(false);
+  }, [refreshAnalytics, wrappedYear]);
 
   useEffect(() => {
     setWrappedLoading(true);
@@ -59,24 +71,8 @@ export default function AnalyticsScreen() {
       .finally(() => setWrappedLoading(false));
   }, [wrappedYear]);
 
-  if (analyticsLoading) {
-    return (
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <View style={styles.page}><Text style={styles.muted}>Loading analytics...</Text></View>
-      </SafeAreaView>
-    );
-  }
-
-  if (!analytics) {
-    return (
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <View style={styles.page}><Text style={styles.muted}>No analytics data</Text></View>
-      </SafeAreaView>
-    );
-  }
-
-  const songChartData = (analytics.top_songs || []).slice(0, 5);
-  const artistChartData = (analytics.top_artists || []).slice(0, 5);
+  const songChartData = (analytics?.top_songs || []).slice(0, 5);
+  const artistChartData = (analytics?.top_artists || []).slice(0, 5);
 
   const songLabels = songChartData.map((s: any) => s.title.length > 10 ? s.title.slice(0, 10) + '\u2026' : s.title);
   const songValues = songChartData.map((s: any) => s.play_count);
@@ -85,46 +81,55 @@ export default function AnalyticsScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <ScrollView style={styles.page} contentContainerStyle={styles.pageContent}>
+      <ScrollView style={styles.page} contentContainerStyle={styles.pageContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />}>
         <Text style={styles.heading}>Analytics</Text>
 
-        <View style={styles.statsRow}>
-          <StatCard value={analytics.total_plays} label="Total Plays" />
-          <StatCard value={fmtTime(analytics.total_listening_time)} label="Listening Time" />
-        </View>
+        {analyticsLoading && !analytics ? (
+          <Text style={styles.muted}>Loading analytics...</Text>
+        ) : !analytics ? (
+          <Text style={styles.muted}>No analytics data</Text>
+        ) : (
+          <>
+            <View style={styles.statsRow}>
+              <StatCard value={analytics.total_plays} label="Total Plays" />
+              <StatCard value={fmtTime(analytics.total_listening_time)} label="Listening Time" />
+            </View>
 
-        <Text style={styles.sectionTitle}>Top Songs</Text>
-        {songChartData.length === 0 ? <Text style={styles.muted}>No plays yet</Text> : (
-          <View style={styles.chartBox}>
-            <BarChart
-              data={{ labels: songLabels, datasets: [{ data: songValues }] }}
-              width={screenWidth}
-              height={180}
-              chartConfig={chartConfig}
-              fromZero
-              showValuesOnTopOfBars
-              yAxisLabel=""
-              yAxisSuffix=""
-              style={styles.chart}
-            />
-          </View>
-        )}
+            <Text style={styles.sectionTitle}>Top Songs</Text>
+            {songChartData.length === 0 ? <Text style={styles.muted}>No plays yet</Text> : (
+              <View style={styles.chartBox}>
+                <BarChart
+                  data={{ labels: songLabels, datasets: [{ data: songValues }] }}
+                  width={screenWidth}
+                  height={180}
+                  chartConfig={chartConfig}
+                  fromZero
+                  showValuesOnTopOfBars
+                  yAxisLabel=""
+                  yAxisSuffix=""
+                  style={styles.chart}
+                />
+              </View>
+            )}
 
-        <Text style={styles.sectionTitle}>Top Artists (min)</Text>
-        {artistChartData.length === 0 ? <Text style={styles.muted}>No artist data</Text> : (
-          <View style={styles.chartBox}>
-            <BarChart
-              data={{ labels: artistLabels, datasets: [{ data: artistValues.length > 0 ? artistValues : [0] }] }}
-              width={screenWidth}
-              height={180}
-              chartConfig={greenChartConfig}
-              fromZero
-              showValuesOnTopOfBars
-              yAxisLabel=""
-              yAxisSuffix=""
-              style={styles.chart}
-            />
-          </View>
+            <Text style={styles.sectionTitle}>Top Artists (min)</Text>
+            {artistChartData.length === 0 ? <Text style={styles.muted}>No artist data</Text> : (
+              <View style={styles.chartBox}>
+                <BarChart
+                  data={{ labels: artistLabels, datasets: [{ data: artistValues.length > 0 ? artistValues : [0] }] }}
+                  width={screenWidth}
+                  height={180}
+                  chartConfig={greenChartConfig}
+                  fromZero
+                  showValuesOnTopOfBars
+                  yAxisLabel=""
+                  yAxisSuffix=""
+                  style={styles.chart}
+                />
+              </View>
+            )}
+          </>
         )}
 
         <View style={styles.wrappedHeader}>

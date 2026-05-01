@@ -24,7 +24,7 @@ export default function MiniPlayer({ onPress }: Props) {
 
   return (
     <TouchableOpacity style={styles.container} onPress={onPress} activeOpacity={0.85}>
-      <CoverImage coverUrl={currentSong.cover_url} size={44} />
+      <CoverImage coverUrl={currentSong.cover_url} songId={currentSong.id} size={44} />
       <View style={styles.info}>
         <Text style={styles.title} numberOfLines={1}>{currentSong.title}</Text>
         <Text style={styles.artist} numberOfLines={1}>{currentSong.artist || 'Unknown Artist'}</Text>

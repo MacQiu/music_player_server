@@ -1,10 +1,31 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, ActivityIndicator } from 'react-native';
 import { Stack } from 'expo-router';
+import { useFonts, Nunito_400Regular, Nunito_600SemiBold, Nunito_700Bold } from '@expo-google-fonts/nunito';
 import { PlayerProvider } from '../contexts/PlayerContext';
 import { DataProvider } from '../contexts/DataContext';
 import { loadServerUrl, saveServerUrl, getBaseUrl } from '../api/client';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Colors, Spacing, FontSize, Radius } from '../constants/theme';
+
+// Apply Nunito globally to all Text components
+const originalRender = (Text as any).render;
+if (originalRender) {
+  (Text as any).render = function (props: any, ref: any) {
+    const style = props.style;
+    const fontWeight = StyleSheet.flatten(style)?.fontWeight;
+    let family = 'Nunito_400Regular';
+    if (fontWeight === '700' || fontWeight === 'bold') family = 'Nunito_700Bold';
+    else if (fontWeight === '600') family = 'Nunito_600SemiBold';
+    return originalRender.call(this, { ...props, style: [{ fontFamily: family }, style] }, ref);
+  };
+} else {
+  // Fallback for environments where Text.render is not available
+  (Text as any).defaultProps = {
+    ...((Text as any).defaultProps || {}),
+    style: { fontFamily: 'Nunito_400Regular' },
+  };
+}
 
 function ServerSetup({ onDone }: { onDone: () => void }) {
   const [url, setUrl] = useState('');
@@ -41,6 +62,7 @@ function ServerSetup({ onDone }: { onDone: () => void }) {
 export default function RootLayout() {
   const [ready, setReady] = useState(false);
   const [hasServer, setHasServer] = useState(false);
+  const [fontsLoaded] = useFonts({ Nunito_400Regular, Nunito_600SemiBold, Nunito_700Bold });
 
   useEffect(() => {
     loadServerUrl().then(url => {
@@ -49,7 +71,13 @@ export default function RootLayout() {
     });
   }, []);
 
-  if (!ready) return null;
+  if (!ready || !fontsLoaded) {
+    return (
+      <View style={{ flex: 1, backgroundColor: Colors.bg, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator color={Colors.accent} />
+      </View>
+    );
+  }
 
   if (!hasServer) {
     return (
@@ -61,48 +89,50 @@ export default function RootLayout() {
   }
 
   return (
-    <PlayerProvider>
-      <DataProvider>
-        <StatusBar barStyle="light-content" />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: Colors.bg },
-            animation: 'slide_from_right',
-          }}
-        >
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen
-            name="playlist/[id]"
-            options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
-          />
-          <Stack.Screen
-            name="artist/[name]"
-            options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
-          />
-          <Stack.Screen
-            name="player"
-            options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
-          />
-          <Stack.Screen
-            name="queue"
-            options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
-          />
-          <Stack.Screen
-            name="lyrics"
-            options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
-          />
-          <Stack.Screen
-            name="upload"
-            options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
-          />
-          <Stack.Screen
-            name="settings"
-            options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
-          />
-        </Stack>
-      </DataProvider>
-    </PlayerProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <PlayerProvider>
+        <DataProvider>
+          <StatusBar barStyle="light-content" />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: Colors.bg },
+              animation: 'slide_from_right',
+            }}
+          >
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen
+              name="playlist/[id]"
+              options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+            />
+            <Stack.Screen
+              name="artist/[name]"
+              options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+            />
+            <Stack.Screen
+              name="player"
+              options={{ presentation: 'containedModal', animation: 'slide_from_bottom' }}
+            />
+            <Stack.Screen
+              name="queue"
+              options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+            />
+            <Stack.Screen
+              name="lyrics"
+              options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+            />
+            <Stack.Screen
+              name="upload"
+              options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+            />
+            <Stack.Screen
+              name="settings"
+              options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+            />
+          </Stack>
+        </DataProvider>
+      </PlayerProvider>
+    </GestureHandlerRootView>
   );
 }
 

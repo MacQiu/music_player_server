@@ -1,64 +1,73 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MiniPlayer from '../../components/MiniPlayer';
-import { Colors, FontSize } from '../../constants/theme';
+import { Colors } from '../../constants/theme';
+
+const TAB_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
+  index: 'home',
+  library: 'musical-notes',
+  analytics: 'bar-chart',
+  sync: 'sync',
+};
+
+const TAB_LABELS: Record<string, string> = {
+  index: 'Home',
+  library: 'Library',
+  analytics: 'Analytics',
+  sync: 'Sync',
+};
+
+function CustomTabBar({ state, navigation }: any) {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+
+  return (
+    <View>
+      <MiniPlayer onPress={() => router.push('/player')} />
+      <View style={[styles.tabBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+        {state.routes.map((route: any, index: number) => {
+          const focused = state.index === index;
+          const color = focused ? Colors.accent : Colors.textMuted;
+          const icon = TAB_ICONS[route.name] || 'ellipse';
+          const label = TAB_LABELS[route.name] || route.name;
+
+          return (
+            <TouchableOpacity
+              key={route.key}
+              style={styles.tabItem}
+              onPress={() => {
+                if (!focused) navigation.navigate(route.name);
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name={icon} size={22} color={color} />
+              <Text style={[styles.tabLabel, { color }]}>{label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
 
 export default function TabLayout() {
-  const router = useRouter();
-
   return (
     <View style={styles.container}>
       <Tabs
+        tabBar={(props) => <CustomTabBar {...props} />}
         screenOptions={{
           headerShown: false,
-          tabBarStyle: {
-            backgroundColor: Colors.surface2,
-            borderTopColor: Colors.border,
-            borderTopWidth: 1,
-          },
-          tabBarActiveTintColor: Colors.accent,
-          tabBarInactiveTintColor: Colors.textMuted,
-          tabBarLabelStyle: {
-            fontSize: 11,
-            fontWeight: '600',
-          },
           sceneStyle: { backgroundColor: Colors.bg },
         }}
       >
-        <Tabs.Screen
-          name="index"
-          options={{
-            title: 'Home',
-            tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} />,
-          }}
-        />
-        <Tabs.Screen
-          name="library"
-          options={{
-            title: 'Library',
-            tabBarIcon: ({ color, size }) => <Ionicons name="musical-notes" size={size} color={color} />,
-          }}
-        />
-        <Tabs.Screen
-          name="analytics"
-          options={{
-            title: 'Analytics',
-            tabBarIcon: ({ color, size }) => <Ionicons name="bar-chart" size={size} color={color} />,
-          }}
-        />
-        <Tabs.Screen
-          name="sync"
-          options={{
-            title: 'Sync',
-            tabBarIcon: ({ color, size }) => <Ionicons name="sync" size={size} color={color} />,
-          }}
-        />
+        <Tabs.Screen name="index" options={{ title: 'Home' }} />
+        <Tabs.Screen name="library" options={{ title: 'Library' }} />
+        <Tabs.Screen name="analytics" options={{ title: 'Analytics' }} />
+        <Tabs.Screen name="sync" options={{ title: 'Sync' }} />
       </Tabs>
-      <View style={styles.miniPlayerWrap}>
-        <MiniPlayer onPress={() => router.push('/player')} />
-      </View>
     </View>
   );
 }
@@ -68,11 +77,22 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.bg,
   },
-  miniPlayerWrap: {
-    position: 'absolute',
-    bottom: 49,
-    left: 0,
-    right: 0,
-    zIndex: 50,
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: Colors.surface2,
+    borderTopColor: Colors.border,
+    borderTopWidth: 1,
+    paddingTop: 8,
+  },
+  tabItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+  },
+  tabLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
   },
 });

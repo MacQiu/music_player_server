@@ -11,9 +11,10 @@ interface Props {
   rightElement?: React.ReactNode;
   imgVersion?: number;
   dimmed?: boolean;
+  subtitle?: string;
 }
 
-export default function SongRow({ song, onPress, onLongPress, rightElement, imgVersion, dimmed }: Props) {
+export default function SongRow({ song, onPress, onLongPress, rightElement, imgVersion, dimmed, subtitle }: Props) {
   return (
     <TouchableOpacity
       style={[styles.row, dimmed && styles.dimmed]}
@@ -21,12 +22,12 @@ export default function SongRow({ song, onPress, onLongPress, rightElement, imgV
       onLongPress={onLongPress}
       activeOpacity={0.7}
     >
-      <CoverImage coverUrl={song.cover_url} size={52} imgVersion={imgVersion} />
+      <CoverImage coverUrl={song.cover_url} songId={song.id} size={52} imgVersion={imgVersion} />
       <View style={styles.info}>
         <Text style={styles.title} numberOfLines={1}>{song.title}</Text>
         <Text style={styles.artist} numberOfLines={1}>{song.artist || 'Unknown Artist'}</Text>
-        {song.downloaded === 0 && (
-          <Text style={styles.notDownloaded}>Not Downloaded</Text>
+        {subtitle && (
+          <Text style={styles.subtitle}>{subtitle}</Text>
         )}
       </View>
       {rightElement}
@@ -59,7 +60,7 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontSize: FontSize.sm,
   },
-  notDownloaded: {
+  subtitle: {
     color: Colors.textMuted,
     fontSize: 10,
     fontStyle: 'italic',

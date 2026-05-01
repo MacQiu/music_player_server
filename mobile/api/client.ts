@@ -19,7 +19,10 @@ export function getBaseUrl(): string {
 }
 
 async function request(method: string, path: string, opts?: { body?: any; isFormData?: boolean }) {
-  const fetchOpts: RequestInit = { method };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3000);
+
+  const fetchOpts: RequestInit = { method, signal: controller.signal };
 
   if (opts?.body && opts.isFormData) {
     fetchOpts.body = opts.body;
@@ -28,14 +31,18 @@ async function request(method: string, path: string, opts?: { body?: any; isForm
     fetchOpts.body = JSON.stringify(opts.body);
   }
 
-  const res = await fetch(`${_baseUrl}${path}`, fetchOpts);
-  const data = await res.json().catch(() => null);
+  try {
+    const res = await fetch(`${_baseUrl}${path}`, fetchOpts);
+    const data = await res.json().catch(() => null);
 
-  if (!res.ok) {
-    const msg = data?.error || `Request failed (${res.status})`;
-    throw new Error(msg);
+    if (!res.ok) {
+      const msg = data?.error || `Request failed (${res.status})`;
+      throw new Error(msg);
+    }
+    return data;
+  } finally {
+    clearTimeout(timeout);
   }
-  return data;
 }
 
 // ---- Core ----

@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, FlatList, TextInput, StyleSheet, Alert } from 'react-native';
+import React, { useMemo, useState, useCallback } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, FlatList, TextInput, StyleSheet, Alert, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -21,6 +21,8 @@ interface CardProps {
   title: string;
   subtitle: string;
   coverUrl?: string | null;
+  songId?: string;
+  cacheKey?: string;
   placeholder?: string;
   round?: boolean;
   onPress: () => void;
@@ -28,10 +30,10 @@ interface CardProps {
   dashed?: boolean;
 }
 
-function Card({ title, subtitle, coverUrl, placeholder = '\u266A', round, onPress, imgVersion, dashed }: CardProps) {
+function Card({ title, subtitle, coverUrl, songId, cacheKey, placeholder = '\u266A', round, onPress, imgVersion, dashed }: CardProps) {
   return (
     <TouchableOpacity style={[styles.card, dashed && styles.cardDashed]} onPress={onPress} activeOpacity={0.7}>
-      <CoverImage coverUrl={coverUrl} size={120} round={round} placeholder={placeholder} imgVersion={imgVersion} />
+      <CoverImage coverUrl={coverUrl} songId={songId} cacheKey={cacheKey} size={120} round={round} placeholder={placeholder} imgVersion={imgVersion} />
       <Text style={styles.cardTitle} numberOfLines={1}>{title}</Text>
       <Text style={styles.cardSub} numberOfLines={1}>{subtitle}</Text>
     </TouchableOpacity>
@@ -39,11 +41,17 @@ function Card({ title, subtitle, coverUrl, placeholder = '\u266A', round, onPres
 }
 
 export default function HomeScreen() {
-  const { songs, analytics, playlists, artists, imgVersion, bumpImgVersion, refreshPlaylists, refreshArtists } = useData();
+  const { songs, analytics, playlists, artists, imgVersion, bumpImgVersion, refreshPlaylists, refreshArtists, refreshAll } = useData();
   const { playSong } = usePlayer();
   const router = useRouter();
   const [showNewPlaylist, setShowNewPlaylist] = useState(false);
   const [newName, setNewName] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refreshAll();
+    setRefreshing(false);
+  }, [refreshAll]);
 
   const safeSongs = songs || [];
 
@@ -98,7 +106,8 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <ScrollView style={styles.page} contentContainerStyle={styles.pageContent}>
+      <ScrollView style={styles.page} contentContainerStyle={styles.pageContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />}>
         <Text style={styles.heading}>Home</Text>
 
         <Text style={styles.sectionTitle}>Recently Played</Text>
@@ -108,7 +117,7 @@ export default function HomeScreen() {
           <CardRow>
             {recentlyPlayed.map((s: any) => (
               <Card key={s.id} title={s.title} subtitle={s.artist || 'Unknown'}
-                coverUrl={s.cover_url} imgVersion={imgVersion}
+                coverUrl={s.cover_url} songId={s.id} imgVersion={imgVersion}
                 onPress={() => playSong(s, safeSongs)} />
             ))}
           </CardRow>
@@ -122,7 +131,7 @@ export default function HomeScreen() {
             {derivedArtists.map((a: any) => (
               <Card key={a.name} title={a.name}
                 subtitle={`${a.song_count} song${a.song_count !== 1 ? 's' : ''}`}
-                coverUrl={a.image_url} round placeholder="\uD83C\uDFA4"
+                coverUrl={a.image_url} cacheKey={`artist_${a.name}`} round placeholder="\uD83C\uDFA4"
                 imgVersion={imgVersion}
                 onPress={() => router.push(`/artist/${encodeURIComponent(a.name)}`)} />
             ))}
@@ -134,7 +143,7 @@ export default function HomeScreen() {
           {userPlaylists.map((p: any) => (
             <Card key={p.id} title={p.name}
               subtitle={`${p.song_count} song${p.song_count !== 1 ? 's' : ''}`}
-              coverUrl={p.cover_url} imgVersion={imgVersion}
+              coverUrl={p.cover_url} cacheKey={`playlist_${p.id}`} imgVersion={imgVersion}
               onPress={() => router.push(`/playlist/${p.id}`)} />
           ))}
           <Card title="New Playlist" subtitle="" placeholder="+"
@@ -162,7 +171,7 @@ export default function HomeScreen() {
               {wrappedPlaylists.map((p: any) => (
                 <Card key={p.id} title={p.name}
                   subtitle={`${p.song_count} song${p.song_count !== 1 ? 's' : ''}`}
-                  coverUrl={p.cover_url} imgVersion={imgVersion} placeholder="\uD83C\uDF81"
+                  coverUrl={p.cover_url} cacheKey={`playlist_${p.id}`} imgVersion={imgVersion} placeholder="\uD83C\uDF81"
                   onPress={() => router.push(`/playlist/${p.id}`)} />
               ))}
             </CardRow>
@@ -177,7 +186,7 @@ export default function HomeScreen() {
                 const full = safeSongs.find(x => x.id === r.id);
                 return (
                   <Card key={r.id} title={r.title} subtitle={r.artist || 'Unknown'}
-                    coverUrl={r.cover_url} imgVersion={imgVersion} placeholder="\u2605"
+                    coverUrl={r.cover_url} songId={r.id} imgVersion={imgVersion} placeholder="\u2605"
                     onPress={() => { if (full) playSong(full, safeSongs); }} />
                 );
               })}

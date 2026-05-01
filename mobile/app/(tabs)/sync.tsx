@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, StyleSheet } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,7 +9,7 @@ import { ping, getSongs, syncLogs, saveServerUrl, getBaseUrl } from '../../api/c
 import { Colors, Spacing, FontSize, Radius } from '../../constants/theme';
 
 export default function SyncScreen() {
-  const { online, setSongs, refreshAnalytics } = useData();
+  const { online, setSongs, refreshAnalytics, refreshAll: refreshAllData } = useData();
   const router = useRouter();
   const [serverOk, setServerOk] = useState<boolean | null>(online || null);
   const [syncOk, setSyncOk] = useState<boolean | null>(null);
@@ -43,11 +43,19 @@ export default function SyncScreen() {
     setLoading(l => ({ ...l, fetch: false }));
   };
 
-  const refreshAll = async () => {
+  const refreshAllSync = async () => {
     await checkServer();
     await fetchSongsAction();
     await refreshAnalytics();
   };
+
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refreshAllData();
+    await checkServer();
+    setRefreshing(false);
+  }, [refreshAllData]);
 
   const getStatusIcon = (loading: boolean, ok: boolean | null, defaultIcon: keyof typeof Ionicons.glyphMap) => {
     if (loading) return <ActivityIndicator size="small" color={Colors.accent} />;
@@ -58,7 +66,8 @@ export default function SyncScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <ScrollView style={styles.page} contentContainerStyle={styles.pageContent}>
+      <ScrollView style={styles.page} contentContainerStyle={styles.pageContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />}>
         <Text style={styles.heading}>Sync</Text>
 
         <View style={styles.rows}>
@@ -98,7 +107,7 @@ export default function SyncScreen() {
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.row} onPress={refreshAll}>
+          <TouchableOpacity style={styles.row} onPress={refreshAllSync}>
             <View style={styles.rowIcon}>
               <Ionicons name="refresh" size={24} color={Colors.accent} />
             </View>

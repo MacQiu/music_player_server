@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Alert, Modal } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Alert, Modal, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -7,6 +7,7 @@ import SongRow from '../../components/SongRow';
 import { useData } from '../../contexts/DataContext';
 import { usePlayer, Song } from '../../contexts/PlayerContext';
 import { uploadCover, addSongToPlaylist, reorderLibrary, toggleDownload } from '../../api/client';
+import { downloadSong, deleteSongLocal } from '../../utils/songStorage';
 import { Colors, Spacing, FontSize, Radius } from '../../constants/theme';
 
 function sortSongs(list: Song[], field: string, dir: string) {
@@ -27,12 +28,18 @@ export default function LibraryScreen() {
   const data = useData();
   const songs = data.songs || [];
   const playlists = data.playlists || [];
-  const { imgVersion, bumpImgVersion, refreshSongs } = data;
+  const { imgVersion, bumpImgVersion, refreshSongs, refreshAll } = data;
   const { playSong, addToQueue } = usePlayer();
   const [search, setSearch] = useState('');
   const [sortField, setSortField] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState('asc');
   const [menuSong, setMenuSong] = useState<Song | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refreshAll();
+    setRefreshing(false);
+  }, [refreshAll]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -68,12 +75,28 @@ export default function LibraryScreen() {
     setMenuSong(null);
   };
 
+  const [downloading, setDownloading] = useState<string | null>(null);
+
   const handleToggleDownload = async (song: Song) => {
-    try {
-      await toggleDownload(song.id, !song.downloaded);
-      refreshSongs();
-    } catch { }
     setMenuSong(null);
+    if (song.downloaded) {
+      try {
+        await deleteSongLocal(song.id, song.file_path);
+        await toggleDownload(song.id, false);
+        refreshSongs();
+      } catch { }
+    } else {
+      try {
+        setDownloading(song.id);
+        await downloadSong(song.id, song.file_path, song.cover_url || undefined);
+        await toggleDownload(song.id, true);
+        refreshSongs();
+      } catch (err) {
+        Alert.alert('Download Failed', 'Could not download the song. Check your connection.');
+      } finally {
+        setDownloading(null);
+      }
+    }
   };
 
   const handleAddToPlaylist = async (playlistId: string, songId: string) => {
@@ -118,13 +141,15 @@ export default function LibraryScreen() {
             data={filtered}
             keyExtractor={item => item.id}
             contentContainerStyle={{ paddingBottom: 120 }}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />}
             renderItem={({ item }) => (
               <SongRow
                 song={item}
                 onPress={() => playSong(item, songs)}
                 onLongPress={() => setMenuSong(item)}
                 imgVersion={imgVersion}
-                dimmed={item.downloaded === 0}
+                dimmed={!item.downloaded}
+                subtitle={downloading === item.id ? 'Downloading...' : (!item.downloaded ? 'Not Downloaded' : undefined)}
                 rightElement={
                   <TouchableOpacity onPress={() => setMenuSong(item)} style={styles.moreBtn}>
                     <Ionicons name="ellipsis-horizontal" size={20} color={Colors.textMuted} />

@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { createAudioPlayer, setAudioModeAsync, AudioPlayer, AudioStatus } from 'expo-audio';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getDownloadUrl, postPlaylog, getCoverUrl } from '../api/client';
+import { getDownloadUrl, getCoverUrl } from '../api/client';
+import { getPlayableUri } from '../utils/songStorage';
+import { enqueueLog } from '../utils/playlogQueue';
 
 export interface Song {
   id: string;
@@ -107,13 +109,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Load and play a song
-  const loadSong = useCallback((song: Song, autoPlay: boolean, seekTo?: number) => {
+  // Load and play a song (uses local file if downloaded, otherwise streams)
+  const loadSong = useCallback(async (song: Song, autoPlay: boolean, seekTo?: number) => {
     const player = playerRef.current;
     if (!player) return;
 
-    const url = getDownloadUrl(song.id);
-    player.replace({ uri: url });
+    const uri = await getPlayableUri(song.id, song.file_path);
+    player.replace({ uri });
     player.loop = repeatMode === 'song';
     loggedTimeRef.current = 0;
 
@@ -142,12 +144,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
   }, [repeatMode]);
 
-  // Play log interval
+  // Play log interval -- enqueue locally, flush happens in DataContext
   const sendLog = useCallback(() => {
     if (!currentSongRef.current || !playerRef.current) return;
     const elapsed = currentTime - loggedTimeRef.current;
     if (elapsed >= 5) {
-      postPlaylog(currentSongRef.current.id, elapsed).catch(() => {});
+      enqueueLog(currentSongRef.current.id, elapsed).catch(() => {});
       loggedTimeRef.current = currentTime;
     }
   }, [currentTime]);

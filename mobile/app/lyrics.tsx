@@ -4,13 +4,35 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { usePlayer } from '../contexts/PlayerContext';
+import { useData } from '../contexts/DataContext';
 import {
   getLyricSets, getLyricSetText, getLegend, getSetColors,
   createLyricSet, updateLyricSet, deleteLyricSet,
   saveLegend, saveSetColors,
 } from '../api/client';
+import {
+  cacheLyricSets, getCachedLyricSets,
+  cacheLyricText, getCachedLyricText,
+  cacheColors, getCachedColors,
+  cacheLegend as cacheLegendLocal, getCachedLegend,
+} from '../utils/lyricsCache';
 import { SINGER_COLORS, COLOR_NAMES } from '../constants/colors';
 import { Colors, Spacing, FontSize, Radius } from '../constants/theme';
+
+// Module-level memory cache keyed by songId so lyrics persist across overlay opens
+const lyricsMemCache = new Map<string, {
+  sets: any[];
+  legend: any;
+  texts: Map<string, string | null>;
+  colors: Map<string, any>;
+}>();
+
+function getOrCreateSongCache(songId: string) {
+  if (!lyricsMemCache.has(songId)) {
+    lyricsMemCache.set(songId, { sets: [], legend: {}, texts: new Map(), colors: new Map() });
+  }
+  return lyricsMemCache.get(songId)!;
+}
 
 function parseLrc(text: string) {
   const lines = text.split('\n');
@@ -71,6 +93,7 @@ function fmtTs(seconds: number) {
 export default function LyricsScreen() {
   const router = useRouter();
   const { currentSong, currentTime, seek } = usePlayer();
+  const { online } = useData();
   const [sets, setSets] = useState<any[]>([]);
   const [activeSetId, setActiveSetId] = useState<string | null>(null);
   const [rawLyrics, setRawLyrics] = useState<string | null>(null);
@@ -92,34 +115,144 @@ export default function LyricsScreen() {
 
   const song = currentSong;
 
-  const fetchSets = useCallback(() => {
+  const fetchSets = useCallback(async () => {
     if (!song) return;
     setError(null);
-    getLyricSets(song.id)
-      .then(data => {
-        const s = data.sets || [];
-        setSets(s);
-        if (s.length > 0) {
-          setActiveSetId(prev => (prev && s.find((x: any) => x.id === prev)) ? prev : s[0].id);
-        } else {
-          setActiveSetId(null);
-          setRawLyrics(null);
-          setError('No lyrics available');
-        }
-      })
-      .catch(() => setError('No lyrics available'));
-    getLegend(song.id).then(setLegendState).catch(() => setLegendState({}));
-  }, [song?.id]);
+
+    // Check module-level cache first
+    const memCached = lyricsMemCache.get(song.id);
+    if (memCached && memCached.sets.length > 0) {
+      setSets(memCached.sets);
+      setLegendState(memCached.legend);
+      if (memCached.sets.length > 0) {
+        setActiveSetId(prev => (prev && memCached.sets.find((x: any) => x.id === prev)) ? prev : memCached.sets[0].id);
+      }
+      return;
+    }
+
+    if (!online) {
+      // Offline: go straight to filesystem cache, skip server entirely
+      const cached = await getCachedLyricSets(song.id);
+      if (cached && cached.length > 0) {
+        setSets(cached);
+        const cache = getOrCreateSongCache(song.id);
+        cache.sets = cached;
+        setActiveSetId(prev => (prev && cached.find((x: any) => x.id === prev)) ? prev : cached[0].id);
+      } else {
+        setError('No lyrics available');
+      }
+      const cachedLeg = await getCachedLegend(song.id);
+      const leg = cachedLeg || {};
+      setLegendState(leg);
+      const cache = getOrCreateSongCache(song.id);
+      cache.legend = leg;
+      return;
+    }
+
+    try {
+      const data = await getLyricSets(song.id);
+      const s = data.sets || [];
+      setSets(s);
+      const cache = getOrCreateSongCache(song.id);
+      cache.sets = s;
+      cacheLyricSets(song.id, s).catch(() => {});
+      if (s.length > 0) {
+        setActiveSetId(prev => (prev && s.find((x: any) => x.id === prev)) ? prev : s[0].id);
+      } else {
+        setActiveSetId(null);
+        setRawLyrics(null);
+        setError('No lyrics available');
+      }
+    } catch {
+      const cached = await getCachedLyricSets(song.id);
+      if (cached && cached.length > 0) {
+        setSets(cached);
+        const cache = getOrCreateSongCache(song.id);
+        cache.sets = cached;
+        setActiveSetId(prev => (prev && cached.find((x: any) => x.id === prev)) ? prev : cached[0].id);
+      } else {
+        setError('No lyrics available');
+      }
+    }
+    try {
+      const leg = await getLegend(song.id);
+      setLegendState(leg);
+      const cache = getOrCreateSongCache(song.id);
+      cache.legend = leg;
+      cacheLegendLocal(song.id, leg).catch(() => {});
+    } catch {
+      const cached = await getCachedLegend(song.id);
+      const leg = cached || {};
+      setLegendState(leg);
+      const cache = getOrCreateSongCache(song.id);
+      cache.legend = leg;
+    }
+  }, [song?.id, online]);
 
   useEffect(() => { fetchSets(); }, [fetchSets]);
 
   useEffect(() => {
     if (!activeSetId || !song) return;
+
+    // Check module-level cache for this set's text/colors
+    const memCached = lyricsMemCache.get(song.id);
+    if (memCached) {
+      const cachedText = memCached.texts.get(activeSetId);
+      const cachedColors = memCached.colors.get(activeSetId);
+      if (cachedText !== undefined) {
+        setRawLyrics(cachedText);
+        setColorMap(cachedColors || {});
+        return;
+      }
+    }
+
     setRawLyrics(null);
     setColorMap({});
-    getLyricSetText(song.id, activeSetId).then(data => setRawLyrics(data.lyrics)).catch(() => setRawLyrics(null));
-    getSetColors(song.id, activeSetId).then(setColorMap).catch(() => setColorMap({}));
-  }, [activeSetId, song?.id]);
+
+    if (!online) {
+      // Offline: go straight to filesystem cache
+      (async () => {
+        const cache = getOrCreateSongCache(song.id);
+        const cachedText = await getCachedLyricText(song.id, activeSetId);
+        setRawLyrics(cachedText);
+        cache.texts.set(activeSetId, cachedText);
+        const cachedColors = await getCachedColors(song.id, activeSetId);
+        const c = cachedColors || {};
+        setColorMap(c);
+        cache.colors.set(activeSetId, c);
+      })();
+      return;
+    }
+
+    (async () => {
+      const cache = getOrCreateSongCache(song.id);
+      try {
+        const data = await getLyricSetText(song.id, activeSetId);
+        setRawLyrics(data.lyrics);
+        cache.texts.set(activeSetId, data.lyrics);
+        if (data.lyrics) cacheLyricText(song.id, activeSetId, data.lyrics).catch(() => {});
+      } catch {
+        const cached = await getCachedLyricText(song.id, activeSetId);
+        setRawLyrics(cached);
+        cache.texts.set(activeSetId, cached);
+      }
+    })();
+
+    (async () => {
+      const cache = getOrCreateSongCache(song.id);
+      try {
+        const colors = await getSetColors(song.id, activeSetId);
+        setColorMap(colors);
+        cache.colors.set(activeSetId, colors);
+        cacheColors(song.id, activeSetId, colors).catch(() => {});
+      } catch {
+        const cached = await getCachedColors(song.id, activeSetId);
+        const c = cached || {};
+        setColorMap(c);
+        cache.colors.set(activeSetId, c);
+      }
+    })();
+  }, [activeSetId, song?.id, online]);
 
   const parsed = useMemo(() => rawLyrics ? parseLrc(rawLyrics) : null, [rawLyrics]);
 
@@ -161,6 +294,8 @@ export default function LyricsScreen() {
     try {
       await updateLyricSet(song.id, activeSetId, { lyrics: buildLrc() });
       await saveSetColors(song.id, activeSetId, colorMap);
+      // Invalidate module cache for this song so next open re-fetches
+      lyricsMemCache.delete(song.id);
       setMode('view');
       fetchSets();
     } catch { }
@@ -173,6 +308,7 @@ export default function LyricsScreen() {
     const primarySet = sets.find((s: any) => s.position === 0);
     try {
       const result = await createLyricSet(song.id, label, newLyricsText, primarySet?.id || null);
+      lyricsMemCache.delete(song.id);
       setShowNewSet(false);
       setNewLabel('');
       setNewLyricsText('');
@@ -185,6 +321,7 @@ export default function LyricsScreen() {
     if (!song) return;
     try {
       await deleteLyricSet(song.id, setId);
+      lyricsMemCache.delete(song.id);
       if (activeSetId === setId) setActiveSetId(null);
       fetchSets();
     } catch { }
@@ -383,7 +520,7 @@ export default function LyricsScreen() {
                   {segments.map((seg, j) => (
                     <Text key={j} style={{ color: getSegmentColor(seg.color, state),
                       fontSize: state === 'active' ? 20 : 16,
-                      fontWeight: state === 'active' ? '700' : '400' }}>
+                      fontFamily: state === 'active' ? 'Nunito_700Bold' : 'Nunito_400Regular' }}>
                       {seg.text}
                     </Text>
                   ))}
@@ -438,10 +575,10 @@ const styles = StyleSheet.create({
   lyricsContent: { padding: Spacing.xl, paddingBottom: 80, alignItems: 'center' },
   lyricLine: { paddingVertical: Spacing.xs, width: '100%' },
   lyricLineActive: {},
-  lyricLineTextWrap: { textAlign: 'center', lineHeight: 32 },
+  lyricLineTextWrap: { textAlign: 'center', lineHeight: 32, fontFamily: 'Nunito_400Regular' },
   plainLyrics: {
     color: Colors.text, fontSize: FontSize.lg, lineHeight: 32,
-    textAlign: 'center', fontFamily: undefined,
+    textAlign: 'center', fontFamily: 'Nunito_400Regular',
   },
   muted: { color: Colors.textMuted, fontSize: FontSize.sm, textAlign: 'center' },
   label: { fontSize: FontSize.sm, color: Colors.textMuted, marginBottom: Spacing.xs },

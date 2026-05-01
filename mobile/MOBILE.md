@@ -59,11 +59,11 @@ mobile/
 │   └── artist/[name].tsx       # Artist detail
 ├── components/
 │   ├── MiniPlayer.tsx          # Sticky mini player bar
-│   ├── CoverImage.tsx          # Cover art with fallback
+│   ├── CoverImage.tsx          # Cover art with offline-aware fallback
 │   └── SongRow.tsx             # Reusable song list row
 ├── contexts/
 │   ├── PlayerContext.tsx        # Audio playback, queue, shuffle/repeat
-│   └── DataContext.tsx          # Songs, playlists, artists, analytics
+│   └── DataContext.tsx          # Songs, playlists, artists, analytics, online state
 ├── api/
 │   └── client.ts               # All backend API calls
 ├── constants/
@@ -78,23 +78,28 @@ mobile/
 
 Everything from the web mobile UI is ported:
 
-- **Music Player** — Play, pause, seek, skip, with background audio support
+- **Music Player** — Play, pause, seek, skip, with background audio support.
+  Panning cover art fills the background while playing, with smooth left-to-right
+  scrolling that tracks the seek bar in real-time. Translucent button circles
+  appear only during playback; fixed-size button wrappers prevent layout shift
+  between play/pause states.
 - **Queue** — Source queue + manual queue, shuffle, repeat (off / playlist / song)
-- **Library** — Search, sort by title/artist/duration, per-song action menu (play, queue, set cover, download flag, add to playlist)
-- **Home** — Recently played, artists, playlists, wrapped playlists, recommendations
+- **Library** — Search, sort by title/artist/duration, per-song action menu (play, queue, set cover, download flag, add to playlist). Pull-to-refresh support.
+- **Home** — Recently played, artists, playlists, wrapped playlists, recommendations. Pull-to-refresh support.
 - **Playlists** — Create, rename, delete, add/remove songs, play all, wrapped stats
 - **Artists** — Artist detail page, image upload, play all
-- **Analytics** — Total stats, top songs/artists charts, yearly wrapped stats
-- **Lyrics** — Synced LRC display with color-coded singer segments, legend, multi-set tabs, full editor with tap-to-stamp timestamp sync
+- **Analytics** — Total stats, top songs/artists charts, yearly wrapped stats. Pull-to-refresh support; cached analytics display instantly while offline.
+- **Lyrics** — Synced LRC display with color-coded singer segments, legend, multi-set tabs, full editor with tap-to-stamp timestamp sync. Module-level memory cache means reopening lyrics for the same song is instant.
 - **Upload** — Pick audio file + cover image, set metadata, upload to server
-- **Sync** — Server health check, sync play logs, fetch songs, refresh analytics
+- **Sync** — Server health check, sync play logs, fetch songs, refresh analytics. Pull-to-refresh support.
+- **Offline-first** — All data (songs, covers, lyrics, analytics, playlists, artists) is cached locally. When offline, the app skips all server calls and loads from cache with zero network delay. Auto-syncs updates when reconnected.
 
 ## Technology
 
 | Concern | Library |
 |---------|---------|
 | Navigation | `expo-router` (file-based) |
-| Audio | `expo-av` |
+| Audio | `expo-audio` |
 | State | React Context + hooks |
 | Styling | React Native `StyleSheet` |
 | Charts | `react-native-chart-kit` |
@@ -102,12 +107,75 @@ Everything from the web mobile UI is ported:
 | File pickers | `expo-document-picker`, `expo-image-picker` |
 | Seek slider | `@react-native-community/slider` |
 | Persistence | `@react-native-async-storage/async-storage` |
+| File storage | `expo-file-system` |
+| Fonts | `expo-font` + `@expo-google-fonts/nunito` |
+| Gestures | `react-native-gesture-handler` |
+| Animations | `react-native-reanimated` |
 
 ## Relationship to the Web UI
 
-This is a standalone React Native app that talks to the **same Flask backend** as the web UI in `test-ui/`. Both can run simultaneously — they share the same database and API.
+This is a standalone React Native app that talks to the **same Flask backend** as the desktop UI in `desktop-server/`. Both can run simultaneously — they share the same database and API.
 
-The web UI (`test-ui/`) is a Vite + React DOM app for browser testing. This mobile app (`mobile/`) is for native iOS testing via Expo Go.
+The desktop UI (`desktop-server/`) is a Vite + React DOM app that serves as the central hub for managing songs, lyrics, statistics, and more. This mobile app (`mobile/`) is for native iOS testing via Expo Go.
+
+## Background Playback (Lock Screen)
+
+The app is configured for background audio playback:
+- `app.json` includes the `expo-audio` plugin with `enableBackgroundPlayback: true`
+- `PlayerContext.tsx` sets `shouldPlayInBackground: true` via `setAudioModeAsync`
+
+**However, this does NOT work in Expo Go.** Expo Go does not support background audio modes -- music will stop when you lock the phone or switch apps.
+
+To get background playback working, you need a **development build**:
+
+```bash
+npx expo prebuild
+npx expo run:ios
+```
+
+Or use EAS Build:
+
+```bash
+npx eas build --platform ios --profile development
+```
+
+This will also work in the final native Swift/iOS app. Background playback is a native capability that requires the actual iOS `UIBackgroundModes` entitlement, which Expo Go cannot provide.
+
+## Local Song Storage
+
+Songs are downloaded to the device's document directory (`expo-file-system`) so they persist across app relaunches. When a song is marked as "downloaded" in the library, the audio file is stored locally and playback uses the local copy instead of streaming from the server.
+
+Files are stored at: `{documentDirectory}songs/{songId}.{ext}`
+
+This storage persists across Expo relaunches and carries over to production iOS builds. Songs that are not downloaded will stream from the server in real-time.
+
+## Offline-First Architecture
+
+The app is designed to work fully offline for downloaded songs. All data is cached locally and the app checks the `online` flag before making any server calls.
+
+### Data Caching
+
+| Data | Cache location | Cache mechanism |
+|------|---------------|-----------------|
+| Songs, playlists, artists, analytics | `AsyncStorage` | Loaded on app launch; refreshed when server is reachable |
+| Cover images (songs, artists, playlists) | `{documentDirectory}covers/` and `{documentDirectory}images/` | `CoverImage` component downloads on first successful server load; skips server entirely when offline |
+| Lyrics (sets, text, colors, legend) | `{documentDirectory}lyrics/{songId}/` | Filesystem cache via `lyricsCache.ts`; module-level memory cache in `lyrics.tsx` for instant re-display |
+| Play logs | `AsyncStorage` queue | Batched and synced when server becomes reachable |
+
+### Offline Behavior
+
+- **`CoverImage` component** reads the `online` flag from `DataContext`. When offline, it resolves images directly from local filesystem cache, never attempting a server URL. This eliminates all network timeouts.
+- **Player overlay** (`player.tsx`) skips `serverUri` when offline and loads cover art from local cache via `getLocalCoverUri()`. A module-level `coverCache` Map persists resolved URIs across overlay opens.
+- **Lyrics overlay** (`lyrics.tsx`) skips all server API calls (`getLyricSets`, `getLegend`, `getLyricSetText`, `getSetColors`) when offline and reads directly from filesystem cache. This eliminates up to 12 seconds of timeout waiting (4 API calls x 3s each).
+- **Analytics** uses a ref-based loading guard so cached analytics display instantly on refresh, without showing a "Loading..." screen.
+- **API timeout**: all `fetch` calls use a 3-second `AbortController` timeout for fast failure detection.
+
+### Auto-Sync on Reconnect
+
+When `DataContext` detects the server coming back online (via the 15-second ping interval), it automatically:
+1. Flushes the offline play log queue via `POST /sync`
+2. Refreshes all data (songs, playlists, artists, analytics)
+3. Re-downloads covers and lyrics for all downloaded songs via `syncDownloadedSongs()`
 
 ## Troubleshooting
 
