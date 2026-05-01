@@ -60,7 +60,10 @@ mobile/
 ├── components/
 │   ├── MiniPlayer.tsx          # Sticky mini player bar
 │   ├── CoverImage.tsx          # Cover art with offline-aware fallback
-│   └── SongRow.tsx             # Reusable song list row
+│   ├── SongRow.tsx             # Reusable song list row
+│   └── SelectionBar.tsx        # Multi-select action bar (batch operations)
+├── hooks/
+│   └── useMultiSelect.ts       # Selection state logic for batch mode
 ├── contexts/
 │   ├── PlayerContext.tsx        # Audio playback, queue, shuffle/repeat
 │   └── DataContext.tsx          # Songs, playlists, artists, analytics, online state
@@ -84,9 +87,9 @@ Everything from the web mobile UI is ported:
   appear only during playback; fixed-size button wrappers prevent layout shift
   between play/pause states.
 - **Queue** — Source queue + manual queue, shuffle, repeat (off / playlist / song)
-- **Library** — Search, sort by title/artist/duration, per-song action menu (play, queue, set cover, download flag, add to playlist). Pull-to-refresh support.
+- **Library** — Unified view with filter chips (All, Playlists, Artists, Wrapped, Songs) mixing playlists, artists, and songs in a single searchable list. Songs filter shows sort pills (title/artist/duration). Per-song action menu (play, queue, set cover, download flag, add to playlist). Long-press to enter multi-select mode with batch actions (add to playlist, download, delete local). Pull-to-refresh support.
 - **Home** — Recently played, artists, playlists, wrapped playlists, recommendations. Pull-to-refresh support.
-- **Playlists** — Create, rename, delete, add/remove songs, play all, wrapped stats
+- **Playlists** — Create, rename, delete, add/remove songs, play all, wrapped stats. Long-press for multi-select with batch remove.
 - **Artists** — Artist detail page, image upload, play all
 - **Analytics** — Total stats, top songs/artists charts, yearly wrapped stats. Pull-to-refresh support; cached analytics display instantly while offline.
 - **Lyrics** — Synced LRC display with color-coded singer segments, legend, multi-set tabs, full editor with tap-to-stamp timestamp sync. Module-level memory cache means reopening lyrics for the same song is instant.

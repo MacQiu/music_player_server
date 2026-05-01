@@ -724,7 +724,6 @@ section { margin-bottom: 1.5rem; }
 .sv-row__title--active { color: var(--accent); }
 .sv-row__subtitle { display: block; font-size: .72rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sv-row__col { font-size: .82rem; color: var(--text-muted); padding: 0 .3rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.sv-row__col--tablet { }
 .sv-row__col--duration { text-align: right; }
 
 .sv-actions { display: flex; align-items: center; gap: .2rem; }
@@ -1098,7 +1097,6 @@ section { margin-bottom: 1.5rem; }
 .av__content { padding-top: .5rem; }
 .av__controls { display: flex; align-items: center; gap: .8rem; padding: 1rem 0; }
 .av__section { margin-bottom: 2rem; }
-.av__tracks { }
 .av__show-more {
   background: none;
   border: none;
@@ -1232,7 +1230,6 @@ section { margin-bottom: 1.5rem; }
 .search-page__top-img { width: 90px; height: 90px; border-radius: var(--radius-sm); overflow: hidden; background: var(--surface3); margin-bottom: .8rem; }
 .search-page__top-name { font-size: 1.8rem; font-weight: 700; margin-bottom: .2rem; }
 .search-page__top-type { font-size: .85rem; color: var(--text-muted); }
-.search-page__songs-col { }
 
 /* ============================
    Modal

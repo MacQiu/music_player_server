@@ -38,18 +38,20 @@ desktop-server/       # Vite + React SPA (desktop hub UI)
     constants/
       colors.js       # Singer color palette (15 colors)
     components/       # DesktopLayout, Sidebar, DesktopPlayer, Player,
-                      # UploadModal, ServerModal, QueueSidebar, LyricsOverlay,
-                      # LyricsEditor, MobilePlayerOverlay, MobileQueueOverlay,
-                      # PlaylistOverlay, ArtistOverlay
+                      # UploadModal, ServerModal, NowPlayingPanel,
+                      # LyricsOverlay, LyricsEditor, PlaylistView,
+                      # ArtistView, SearchView, SongView, GridCard,
+                      # MobilePlayerOverlay, MobileQueueOverlay
     pages/            # Home, Library, Analytics, Sync (mobile)
                       # DesktopHome, DesktopLibrary, DesktopAnalytics,
                       # DesktopDevTools (desktop)
-    App.jsx           # Root: mode toggle, shared audio, queue state, resume
+    App.jsx           # Root: shared audio, queue state, resume
     index.css         # All styles
 mobile/               # Expo + React Native app (iOS)
   app/                # Expo Router file-based routes
-  components/         # MiniPlayer, CoverImage, SongRow
+  components/         # MiniPlayer, CoverImage, SongRow, SelectionBar
   contexts/           # PlayerContext, DataContext
+  hooks/              # useMultiSelect (batch selection logic)
   utils/              # songStorage, playlogQueue, lyricsCache
   api/client.ts       # Mobile API client (3s timeout)
   constants/          # theme, colors
@@ -105,7 +107,7 @@ See [`mobile/MOBILE.md`](mobile/MOBILE.md) for full setup instructions.
 - `playlogs(id PK, song_id, duration, timestamp, received_at)`
 - `playlists(id PK, name, created_at)`
 - `playlist_songs(playlist_id, song_id, position)` -- composite PK, FK cascade
-- `artists(name PK, image_path, created_at)`
+- `artists(name PK, image_path, image_position, image_position_mobile, created_at)`
 - `lyric_sets(id PK, song_id, label, position)` -- FK cascade on songs
 
 Idempotency: `playlogs.id` is a UUID the client generates when a play
@@ -141,8 +143,9 @@ All responses are JSON. Errors look like `{"error": "..."}`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/artists` | List all artists with image URLs and song counts |
+| `GET` | `/artists` | List all artists with image URLs, image positions, and song counts |
 | `POST` | `/artists/<name>/image` | Upload artist profile image (`image` file field) |
+| `PUT` | `/artists/<name>/position` | Update artist image position: `{ "image_position": "...", "image_position_mobile": "..." }` (at least one required) |
 | `GET` | `/artist-image/<name>` | Serve artist image |
 
 ### Playlists
@@ -214,25 +217,43 @@ The desktop UI lives in `desktop-server/` and serves as the central hub for
 managing your music library -- uploading songs, editing lyrics, tracking
 statistics, and creating wrapped playlists.
 
-- **Sidebar**: Home, Library, Analytics navigation; playlist list split into
-  user playlists and Wrapped playlists; inline create; cloud-upload icon for
-  song upload modal; gear icon for server controls modal. Dev Tools nav link
-  appears when developer mode is active.
-- **Main content**: Home (recently played, artists with image upload, playlists
-  that open as overlays, recommended cards), Library (searchable song table
-  with drag-and-drop manual reordering, column sorting for title/artist/album/
-  duration, right-click context menu for play/queue/set cover/add to playlist),
-  Analytics (stat cards + recharts charts + yearly wrapped section with year
-  selector, read-only), Dev Tools (test data management, wrapped playlist
-  creation, empty playback playlist builder)
+- **Top bar**: KillerTunes branding (left), Home button + search input + All
+  Songs button (center), Analytics/Upload/Server buttons (right). Typing in
+  the search input navigates to a unified search view. Active page buttons
+  are highlighted.
+- **Sidebar**: collapsible "Your Library" panel. Expanded: filter chips
+  (Playlists, Artists, Wrapped) to filter the unified list of playlists,
+  artists, and wrapped playlists; inline create playlist; Dev chip appears when
+  developer mode is active. Collapsed: narrow column of thumbnail icons for
+  quick access. Currently-playing artist is highlighted.
+- **Main content**: Home (recently played, artists with image upload, playlists,
+  recommended cards), Library (searchable song table with drag-and-drop manual
+  reordering, column sorting for title/artist/album/duration, right-click
+  context menu for play/queue/set cover/add to playlist), Analytics (stat
+  cards + recharts charts + yearly wrapped section with year selector,
+  read-only), Dev Tools (test data management, wrapped playlist creation,
+  empty playback playlist builder)
+- **Playlist view**: full-page detail view with playlist header (cover, editable
+  name, track count, duration), Play All/Add Songs/Delete buttons, song list
+  with reorder/remove/queue, and searchable add-song panel. Navigated via
+  sidebar or Home page. Back button returns to previous page.
+- **Wrapped playlist view**: read-only; hides Add Songs, Delete, rename,
+  remove, and drag controls. Shows per-song play count and listening time
+  for the wrapped year.
+- **Artist view**: full-page detail with hero banner (artist image as
+  background), Play All button, album groupings, song list, and image upload.
+  Back button returns to previous page.
+- **Search view**: unified search across songs, artists, and playlists with
+  filter pills (All, Songs, Artists, Playlists). Top result card with
+  play button, categorized result sections.
 - **Bottom player bar**: cover thumbnail + song info (left), shuffle/prev/
-  play/pause/next/repeat controls + seek bar (center), lyrics/queue/volume/
-  connection icons (right). Repeat and shuffle icons use matching SVG style
-  with active-state highlighting. Single-song repeat shows a visible "1".
-- **Queue sidebar**: slides in from right; sections: previously in queue (songs
-  above current in source list), now playing, added to queue (manual), playing
-  next (remaining songs in source list). Tap to jump, drag to reorder manual
-  queue, remove from manual queue.
+  play/pause/next/repeat controls + seek bar (center), lyrics/queue/details/
+  volume/connection icons (right). Repeat and shuffle icons use matching SVG
+  style with active-state highlighting. Single-song repeat shows a visible "1".
+- **Now Playing panel**: slides in from right with two tab modes: "Now Playing"
+  (cover card + next up preview) and "Queue" (previously played, now playing,
+  added to queue, playing next). Tap to jump, drag to reorder manual queue,
+  remove from manual queue.
 - **Lyrics overlay**: replaces main content with synced lyrics that auto-scroll
   and highlight as the song plays. Supports multiple lyric sets (e.g. Original,
   Romanized, Translated) with a tab bar to switch between them. Color-coded
@@ -242,19 +263,14 @@ statistics, and creating wrapped playlists.
   picker to select from existing cover images to avoid re-uploading duplicates.
   Covers can be deleted from the library via a delete button on each thumbnail.
 - **Server modal**: server status, sync, fetch, analytics refresh
-- **Playlist overlay**: modal dialog with playlist header (cover, editable name,
-  track count, duration), Play All/Add Songs/Delete buttons, song list with
-  reorder/remove/queue, and searchable add-song panel
-- **Wrapped playlist overlay**: read-only; hides Add Songs, Delete, rename,
-  remove, and drag controls. Shows per-song play count and listening time
-  for the wrapped year.
-- **Artist overlay**: clicking an artist opens a modal with all songs by that
-  artist and an option to upload/change their profile image
-- **Developer mode**: toggled with `Ctrl+Shift+D`. Adds a "Dev Tools" page
-  accessible from the sidebar with: generate/delete test play data, create
-  wrapped playlists from actual data, and create empty playback playlists
-  by manually selecting and ordering songs (for retroactively adding old
-  yearly playlists without play data).
+- **Navigation**: view history with back navigation on detail pages (playlist,
+  artist). Switching between top-level pages (Home, Library, Analytics) resets
+  history. Detail-to-detail navigation replaces in place without stacking.
+- **Developer mode**: toggled with `Ctrl+Shift+D`. Adds a "Dev" chip to the
+  sidebar filters. The Dev Tools page provides: generate/delete test play
+  data, create wrapped playlists from actual data, and create empty playback
+  playlists by manually selecting and ordering songs (for retroactively adding
+  old yearly playlists without play data).
 
 ## Mobile UI (SoundCloud-inspired)
 
@@ -266,11 +282,17 @@ for offline playback.
   playlists split into user playlists and Wrapped playlists (tap to open
   playlist overlay), recommendations (random 5 from top 15 most played).
   Non-downloaded songs appear greyed out with "Not Downloaded" label.
-- **Library tab**: search bar, sort pills (Title, Artist, Duration) with
-  ascending/descending toggles, Reorder mode with up/down arrow buttons for
-  manual library reordering, song list with "..." menu for play/queue/set
-  cover/download toggle/add to playlist. Non-downloaded songs are dimmed
-  with a "Not Downloaded" subtitle.
+- **Library tab**: unified view with filter chips (All, Playlists, Artists,
+  Wrapped, Songs) that mix playlists, artists, and songs into a single
+  searchable list. Songs filter shows sort pills (Title, Artist, Duration)
+  with ascending/descending toggles. Song list with "..." menu for play/
+  queue/set cover/download toggle/add to playlist. Non-downloaded songs are
+  dimmed with a "Not Downloaded" subtitle.
+- **Multi-select mode** (mobile): long-press any song in the Library or
+  Playlist view to enter selection mode. A `SelectionBar` appears at the
+  bottom with select all/deselect all and batch actions: Add to Playlist,
+  Download, Delete Local (library) or Remove (playlists). Tap songs to
+  toggle selection.
 - **Analytics tab**: stat cards + recharts charts + yearly wrapped section
 - **Sync tab**: card rows for server status, sync status, fetch songs
 - **Mini player bar**: sits above the tab bar in a custom tab bar layout;
@@ -485,10 +507,11 @@ orange repeat-one style).
 - When uploading a new song, existing covers can be selected to avoid
   re-uploading the same image.
 - Artist images can be uploaded by clicking/tapping an artist card that has
-  no image yet, or via the artist overlay.
+  no image yet, or via the artist view.
 - Image containers are sized for high-resolution display across both UIs.
 - Database migrations run automatically on startup (cover dedup, sort_order
-  backfill, artist backfill, lyrics directory restructuring, download column).
+  backfill, artist backfill, artist image position columns, lyrics directory
+  restructuring, download column).
 - Background audio on mobile requires a development build (not Expo Go).
 - The mobile app is fully functional offline for downloaded songs, including
   playback, cover images, lyrics, and analytics display.
