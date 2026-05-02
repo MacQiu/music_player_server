@@ -169,7 +169,7 @@ export default function DesktopLayout({
     <div className="desktop">
       {/* Top ribbon bar */}
       <div className="desktop__topbar">
-        <span className="topbar__title">KillerTunes</span>
+        <img src="/logo.svg" alt="Spectrum" className="topbar__logo" />
         <div className="topbar__center">
           <button className={`topbar__btn ${view.page === 'home' ? 'topbar__btn--active' : ''}`}
             onClick={() => navigateTo('home')} title="Home">

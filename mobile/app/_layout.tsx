@@ -32,7 +32,7 @@ function ServerSetup({ onDone }: { onDone: () => void }) {
 
   return (
     <View style={styles.setup}>
-      <Text style={styles.setupTitle}>KillerTunes</Text>
+      <Text style={styles.setupTitle}>Spectrum</Text>
       <Text style={styles.setupSub}>Enter your server address</Text>
       <TextInput
         style={styles.setupInput}

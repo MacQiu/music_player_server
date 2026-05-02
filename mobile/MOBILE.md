@@ -1,6 +1,6 @@
-# KillerTunes Mobile (Expo / React Native)
+# Spectrum Mobile (Expo / React Native)
 
-A native mobile port of the KillerTunes web UI, built with Expo and React Native. Designed for testing the iOS experience via Expo Go, with the goal of eventually porting to a native SwiftUI app.
+A native mobile port of the Spectrum web UI, built with Expo and React Native. Designed for testing the iOS experience via Expo Go, with the goal of eventually porting to a native SwiftUI app.
 
 ## Prerequisites
 

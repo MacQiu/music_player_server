@@ -217,7 +217,7 @@ The desktop UI lives in `desktop-server/` and serves as the central hub for
 managing your music library -- uploading songs, editing lyrics, tracking
 statistics, and creating wrapped playlists.
 
-- **Top bar**: KillerTunes branding (left), Home button + search input + All
+- **Top bar**: Spectrum logo (left), Home button + search input + All
   Songs button (center), Analytics/Upload/Server buttons (right). Typing in
   the search input navigates to a unified search view. Active page buttons
   are highlighted.
