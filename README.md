@@ -3,7 +3,7 @@
 A local-first Flask backend + React desktop UI + Expo mobile app for a
 personal music player. The desktop server (`desktop-server/`) is the central
 hub for uploading songs, managing lyrics, and tracking statistics. The mobile
-app (`mobile/`) connects to the server for syncing and can store songs locally
+app (`mobile_expo/`) connects to the server for syncing and can store songs locally
 for offline playback.
 
 Desktop UI is Spotify-inspired (sidebar, bottom player bar, queue, lyrics).
@@ -47,7 +47,7 @@ desktop-server/       # Vite + React SPA (desktop hub UI)
                       # DesktopDevTools (desktop)
     App.jsx           # Root: shared audio, queue state, resume
     index.css         # All styles
-mobile/               # Expo + React Native app (iOS)
+mobile_expo/          # Expo + React Native app (iOS)
   app/                # Expo Router file-based routes
   components/         # MiniPlayer, CoverImage, SongRow, SelectionBar
   contexts/           # PlayerContext, DataContext
@@ -55,6 +55,14 @@ mobile/               # Expo + React Native app (iOS)
   utils/              # songStorage, playlogQueue, lyricsCache
   api/client.ts       # Mobile API client (3s timeout)
   constants/          # theme, colors
+mobile_ios/           # Native Swift/SwiftUI app (iOS)
+  Spectrum/           # Xcode project source
+    Models/           # Codable data models
+    Services/         # APIClient, AudioEngine, StorageManager
+    ViewModels/       # PlayerViewModel, DataViewModel
+    Views/            # All SwiftUI screens
+    Components/       # Shared UI components
+    Theme/            # Colors, spacing, typography
 ```
 
 ---
@@ -91,12 +99,19 @@ Flask. To access from a phone on the same network, run `npm run dev -- --host`.
 ### Mobile App
 
 ```bash
-cd mobile
+cd mobile_expo
 npm install
 npx expo start
 ```
 
-See [`mobile/MOBILE.md`](mobile/MOBILE.md) for full setup instructions.
+See [`mobile_expo/MOBILE_EXPO.md`](mobile_expo/MOBILE_EXPO.md) for full setup instructions.
+
+### Native iOS App
+
+Open `mobile_ios/Spectrum.xcodeproj` in Xcode, select your development team, connect
+your iPhone, and press Cmd+R to build and run. Requires Xcode 15+ and iOS 17+.
+
+See [`mobile_ios/MOBILE_IOS.md`](mobile_ios/MOBILE_IOS.md) for full setup instructions.
 
 ---
 
@@ -274,7 +289,7 @@ statistics, and creating wrapped playlists.
 
 ## Mobile UI (SoundCloud-inspired)
 
-The mobile app lives in `mobile/` and is built with Expo + React Native. It
+The mobile app lives in `mobile_expo/` and is built with Expo + React Native. It
 connects to the desktop server for syncing and can download songs locally
 for offline playback.
 
@@ -335,7 +350,7 @@ The player resolves local files first (if downloaded) and falls back to
 streaming from the server.
 
 **Background playback** (lock screen / app switch) requires a development
-build -- it does not work in Expo Go. See `mobile/MOBILE.md` for setup
+build -- it does not work in Expo Go. See `mobile_expo/MOBILE_EXPO.md` for setup
 instructions.
 
 ## Queue Model
@@ -448,7 +463,7 @@ The mobile app caches all data locally so it works without the server:
 ## Offline Play Log Queue (Mobile)
 
 Play logs are stored in a local AsyncStorage-backed queue
-(`mobile/utils/playlogQueue.ts`) instead of being sent directly to the server.
+(`mobile_expo/utils/playlogQueue.ts`) instead of being sent directly to the server.
 Each log entry includes a client-generated UUID for idempotency.
 
 When the server becomes reachable (detected via the 15-second ping interval

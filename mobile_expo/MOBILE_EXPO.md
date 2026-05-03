@@ -11,7 +11,7 @@ A native mobile port of the Spectrum web UI, built with Expo and React Native. D
 ## Getting Started
 
 ```bash
-cd mobile
+cd mobile_expo
 npm install
 npx expo start
 ```
@@ -41,7 +41,7 @@ You can change this later from the **Sync** tab > **Server Settings**.
 ## Project Structure
 
 ```
-mobile/
+mobile_expo/
 ├── app/                        # Expo Router file-based routes
 │   ├── _layout.tsx             # Root: server setup, providers
 │   ├── (tabs)/                 # Bottom tab navigator
@@ -119,7 +119,7 @@ Everything from the web mobile UI is ported:
 
 This is a standalone React Native app that talks to the **same Flask backend** as the desktop UI in `desktop-server/`. Both can run simultaneously — they share the same database and API.
 
-The desktop UI (`desktop-server/`) is a Vite + React DOM app that serves as the central hub for managing songs, lyrics, statistics, and more. This mobile app (`mobile/`) is for native iOS testing via Expo Go.
+The desktop UI (`desktop-server/`) is a Vite + React DOM app that serves as the central hub for managing songs, lyrics, statistics, and more. This mobile app (`mobile_expo/`) is for native iOS testing via Expo Go.
 
 ## Background Playback (Lock Screen)
 
@@ -186,7 +186,7 @@ When `DataContext` detects the server coming back online (via the 15-second ping
 
 **`npm install` fails with ERESOLVE peer dependency conflict** -- This happens when npm's strict dependency resolver finds mismatched peer dependencies between React and React DOM versions in the Expo ecosystem. The `.npmrc` file in this project is set to `legacy-peer-deps=true` to handle this automatically. If you deleted `.npmrc` or are seeing this error:
 
-1. Make sure `mobile/.npmrc` exists and contains `legacy-peer-deps=true`
+1. Make sure `mobile_expo/.npmrc` exists and contains `legacy-peer-deps=true`
 2. Delete `node_modules` and `package-lock.json`
 3. Run `npm install` again
 
