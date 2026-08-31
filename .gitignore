@@ -209,4 +209,4 @@ __marimo__/
 # Music server local state
 data/
 storage/
-
+/desktop-server/release/

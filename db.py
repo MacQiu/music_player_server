@@ -13,6 +13,8 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from typing import Iterator
+import shutil
+import logging
 
 
 DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
@@ -130,6 +132,49 @@ def _migrate_cover_dedup(conn: sqlite3.Connection) -> None:
 
 LYRICS_DIR = os.path.join(BASE_DIR, "storage", "lyrics")
 
+def _migrate_cleanup_orphaned_lyrics(conn: sqlite3.Connection) -> None:
+    """One-time cleanup: remove lyrics folders that don't match any current song.
+
+    Handles two kinds of orphan:
+      - Old-style folders still named by song_id (from before the readable-name
+        migration), where that song_id no longer exists in `songs`.
+      - Readable-name folders ("{Title} - {Artist}" or "{Title}") that don't
+        match any current song's title/artist combination — e.g. left behind
+        because delete_song() never cleaned up the lyrics directory.
+    """
+    if not os.path.isdir(LYRICS_DIR):
+        return
+
+    def _safe(text: str) -> str:
+        import re
+        return re.sub(r'[<>:"/\\|?*]', "_", text).strip().rstrip(".") or "unknown"
+
+    # Build the set of directory names that SHOULD exist right now, one per
+    # song that still has at least one lyric_sets row.
+    valid_names = set()
+    rows = conn.execute(
+        "SELECT DISTINCT s.id, s.title, s.artist "
+        "FROM songs s JOIN lyric_sets ls ON ls.song_id = s.id"
+    ).fetchall()
+    for r in rows:
+        base = r["title"]
+        if r["artist"]:
+            base = f"{r['title']} - {r['artist']}"
+        valid_names.add(_safe(base))
+        valid_names.add(r["id"])  # tolerate not-yet-renamed old-style folders
+
+    for entry in os.listdir(LYRICS_DIR):
+        entry_path = os.path.join(LYRICS_DIR, entry)
+        if not os.path.isdir(entry_path):
+            continue
+        if entry in valid_names:
+            continue
+        try:
+            shutil.rmtree(entry_path)
+        except OSError as e:
+            logging.getLogger("music_server").warning(
+                "Could not remove orphaned lyrics dir %s: %s", entry_path, e
+            )
 
 def _migrate_lyrics_to_sets(conn: sqlite3.Connection) -> None:
     """Migrate old {song_id}.lrc files into {song_id}/ directories with DB entries."""
@@ -252,6 +297,8 @@ def init_db() -> None:
         # Rename lyrics dirs/files to human-readable names.
         _migrate_lyrics_readable_names(conn)
         # Migrate existing DBs that lack artist image_position columns.
+        _migrate_cleanup_orphaned_lyrics(conn)
+        # Deletes old unlinked lyrics files. 
         try:
             conn.execute("SELECT image_position FROM artists LIMIT 1")
         except sqlite3.OperationalError:

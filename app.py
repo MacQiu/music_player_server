@@ -30,6 +30,7 @@ from werkzeug.utils import secure_filename
 
 import db
 import utils
+import shutil
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -767,6 +768,11 @@ def create_app() -> Flask:
                     (row["cover_path"], song_id),
                 ).fetchone()["cnt"]
 
+            has_lyrics = conn.execute(
+                "SELECT 1 FROM lyric_sets WHERE song_id = ? LIMIT 1", (song_id,)
+            ).fetchone()
+            lyrics_dir_to_remove = _lyrics_dir(song_id) if has_lyrics else None
+
             conn.execute("DELETE FROM playlogs WHERE song_id = ?", (song_id,))
             conn.execute("DELETE FROM playlist_songs WHERE song_id = ?", (song_id,))
             conn.execute("DELETE FROM songs WHERE id = ?", (song_id,))
@@ -786,6 +792,12 @@ def create_app() -> Flask:
                     os.remove(abs_path)
             except OSError as e:
                 app.logger.warning("Could not delete cover %s: %s", abs_path, e)
+
+        if lyrics_dir_to_remove and os.path.isdir(lyrics_dir_to_remove):
+            try:
+                shutil.rmtree(lyrics_dir_to_remove)
+            except OSError as e:
+                app.logger.warning("Could not delete lyrics dir %s: %s", lyrics_dir_to_remove, e)
 
         return jsonify({"ok": True, "id": song_id})
 
