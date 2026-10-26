@@ -68,7 +68,11 @@ def _save_cover(file_storage, song_id: str = "") -> str | None:
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
-    CORS(app)
+    CORS(
+        app,
+        expose_headers=["Content-Length", "Content-Range", "Accept-Ranges"],
+        allow_private_network=True,
+    )
 
     for d in (SONGS_DIR, LYRICS_DIR, COVERS_DIR, ARTISTS_DIR):
         os.makedirs(d, exist_ok=True)
@@ -1207,6 +1211,26 @@ def create_app() -> Flask:
 
 app = create_app()
 
+HTTP_PORT = 5000
+HTTPS_PORT = int(os.environ.get("SPECTRUM_HTTPS_PORT", "5443"))
+CERT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs")
+SSL_CERT = os.environ.get("SPECTRUM_SSL_CERT", os.path.join(CERT_DIR, "cert.pem"))
+SSL_KEY = os.environ.get("SPECTRUM_SSL_KEY", os.path.join(CERT_DIR, "key.pem"))
+
+
+def _start_https_server() -> None:
+    """Serve HTTPS alongside HTTP when a certificate exists (needed by the GitHub Pages PWA)."""
+    if not (os.path.isfile(SSL_CERT) and os.path.isfile(SSL_KEY)):
+        app.logger.info("No certificate in %s; HTTPS disabled (PWA on iPhone needs it)", CERT_DIR)
+        return
+    import threading
+    from werkzeug.serving import make_server
+
+    server = make_server("0.0.0.0", HTTPS_PORT, app, threaded=True, ssl_context=(SSL_CERT, SSL_KEY))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    app.logger.info("HTTPS listening on https://0.0.0.0:%d", HTTPS_PORT)
+
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    _start_https_server()
+    app.run(host="0.0.0.0", port=HTTP_PORT, debug=False)

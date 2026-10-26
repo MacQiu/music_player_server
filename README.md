@@ -55,6 +55,8 @@ mobile_expo/          # Expo + React Native app (iOS)
   utils/              # songStorage, playlogQueue, lyricsCache
   api/client.ts       # Mobile API client (3s timeout)
   constants/          # theme, colors
+mobile_pwa/           # Vite + React progressive web app (GitHub Pages)
+  src/                # Port of the mobile_expo UI with IndexedDB storage
 mobile_ios/           # Native Swift/SwiftUI app (iOS)
   Spectrum/           # Xcode project source
     Models/           # Codable data models
@@ -83,7 +85,10 @@ python app.py
 ```
 
 Server listens on `http://0.0.0.0:5000`. From another device on the same WiFi,
-use your machine's LAN IP (e.g. `http://192.168.1.42:5000`).
+use your machine's LAN IP (e.g. `http://192.168.1.42:5000`). If `certs/cert.pem`
+and `certs/key.pem` exist, it also listens on `https://0.0.0.0:5443` for the
+PWA (see below). Override the paths/port with `SPECTRUM_SSL_CERT`,
+`SPECTRUM_SSL_KEY`, and `SPECTRUM_HTTPS_PORT`.
 
 ### Desktop UI
 
@@ -105,6 +110,48 @@ npx expo start
 ```
 
 See [`mobile_expo/MOBILE_EXPO.md`](mobile_expo/MOBILE_EXPO.md) for full setup instructions.
+
+### Progressive Web App (GitHub Pages)
+
+`mobile_pwa/` is a web port of the mobile UI that installs to the iPhone Home
+Screen, stores downloaded songs, covers, lyrics, and library data in
+IndexedDB, and keeps working offline after the app is closed. It is deployed
+to GitHub Pages by `.github/workflows/deploy-pwa.yml`.
+
+GitHub Pages is HTTPS-only, and Safari blocks HTTPS pages from calling a
+plain `http://` LAN address. So when a certificate is present, `app.py` also
+serves HTTPS on port **5443**, alongside the usual HTTP on 5000 (the desktop UI
+and Expo app keep using 5000). The phone only needs the server on home Wi-Fi
+while syncing; downloaded songs play with the server off.
+
+One-time setup with [mkcert](https://github.com/FiloSottile/mkcert):
+
+1. On the PC, install mkcert and create a local certificate authority:
+   ```powershell
+   winget install FiloSottile.mkcert
+   mkcert -install
+   ```
+2. Find the PC's Wi-Fi IPv4 address with `ipconfig` (e.g. `192.168.1.42`),
+   then create the server certificate in `certs/` (gitignored):
+   ```powershell
+   mkdir certs
+   mkcert -cert-file certs/cert.pem -key-file certs/key.pem 192.168.1.42 localhost 127.0.0.1
+   ```
+3. Start Flask with `python app.py`. The log should say
+   `HTTPS listening on https://0.0.0.0:5443`. Allow Python through Windows
+   Firewall on private networks if prompted.
+4. Trust the authority on the iPhone. Run `mkcert -CAROOT` to find the folder,
+   copy `rootCA.pem` to the phone as `rootCA.crt` (e.g. via iCloud Drive or
+   email), open it, then install it under **Settings → General → VPN & Device
+   Management**. Finally turn it on under **Settings → General → About →
+   Certificate Trust Settings**. Never share `rootCA-key.pem`.
+5. In the PWA, enter `https://192.168.1.42:5443` as the server address.
+
+Give the PC a fixed IP (a DHCP reservation in the router) so the address
+doesn't change. If it does change, rerun step 2 with the new IP; the phone
+doesn't need the authority reinstalled.
+
+See [`mobile_pwa/MOBILE_PWA.md`](mobile_pwa/MOBILE_PWA.md) for full details.
 
 ### Native iOS App
 
