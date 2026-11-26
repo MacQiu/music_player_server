@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { BarChart, Bar, XAxis, YAxis, LabelList, ResponsiveContainer, CartesianGrid } from 'recharts';
 import ScrollPage from '../components/ScrollPage';
 import { useData } from '../contexts/DataContext';
+import { getPeriodAnalytics } from '../api/client';
+import WrappedSyncBanner from '../components/WrappedSyncBanner';
 import { fmtListeningTime } from '../utils/format';
 import { Colors } from '../constants/theme';
 
@@ -39,6 +41,10 @@ export default function AnalyticsScreen() {
   const [wrappedYear, setWrappedYear] = useState(currentYear);
   const [wrapped, setWrapped] = useState<any>(null);
   const [wrappedLoading, setWrappedLoading] = useState(false);
+  const [period, setPeriod] = useState<'all' | 'week' | 'month' | 'year'>('all');
+  const [periodKey, setPeriodKey] = useState('');
+  const [periodKeys, setPeriodKeys] = useState<string[]>([]);
+  const [periodData, setPeriodData] = useState<any>(null);
   const years = Array.from({ length: 6 }, (_, i) => currentYear - i);
 
   const fetchWrapped = useCallback(async (year: number) => {
@@ -55,9 +61,25 @@ export default function AnalyticsScreen() {
 
   useEffect(() => { fetchWrapped(wrappedYear); }, [wrappedYear, online, fetchWrapped]);
 
-  const songChartData = (analytics?.top_songs || []).slice(0, 5)
+  useEffect(() => {
+    if (period === 'all') return;
+    let cancelled = false;
+    getPeriodAnalytics(period, periodKey || undefined)
+      .then(data => {
+        if (cancelled) return;
+        setPeriodKeys(data.keys || []);
+        setPeriodData(data.snapshot);
+        if (data.key && data.key !== periodKey) setPeriodKey(data.key);
+      })
+      .catch(() => { if (!cancelled) setPeriodData(null); });
+    return () => { cancelled = true; };
+  }, [period, periodKey, online]);
+
+  const songSource = period === 'all' ? (analytics?.top_songs || []) : (periodData?.top_songs || []);
+  const artistSource = period === 'all' ? (analytics?.top_artists || []) : (periodData?.top_artists || []);
+  const songChartData = songSource.slice(0, 5)
     .map((s: any) => ({ label: truncate(s.title, 10), value: s.play_count }));
-  const artistChartData = (analytics?.top_artists || []).slice(0, 5)
+  const artistChartData = artistSource.slice(0, 5)
     .map((a: any) => ({ label: truncate(a.artist, 10), value: Math.round((a.total_time || 0) / 60) }));
   const wrappedChartData = (wrapped?.top_songs || []).slice(0, 5)
     .map((s: any) => ({ label: truncate(s.title, 8), value: s.play_count }));
@@ -66,7 +88,24 @@ export default function AnalyticsScreen() {
     <ScrollPage onRefresh={onRefresh}>
       <div className="page-pad">
         <h1 className="heading">Analytics</h1>
+        <WrappedSyncBanner />
         {!online && analytics && <div className="offline-note">Offline: showing last synced stats.</div>}
+
+        <div className="chips-row">
+          {([['all', 'All-time'], ['week', 'Week'], ['month', 'Month'], ['year', 'Year']] as const).map(([id, label]) => (
+            <button key={id} className={`chip ${period === id ? 'active' : ''}`}
+              onClick={() => { setPeriod(id); setPeriodKey(''); setPeriodData(null); }}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {period !== 'all' && periodKeys.length > 0 && (
+          <div className="year-picker">
+            {periodKeys.map(k => (
+              <button key={k} className={`year-btn ${periodKey === k ? 'active' : ''}`} onClick={() => setPeriodKey(k)}>{k}</button>
+            ))}
+          </div>
+        )}
 
         {analyticsLoading && !analytics ? (
           <div className="muted">Loading analytics...</div>
@@ -75,8 +114,8 @@ export default function AnalyticsScreen() {
         ) : (
           <>
             <div className="stats-row">
-              <StatCard value={analytics.total_plays} label="Total Plays" />
-              <StatCard value={fmtListeningTime(analytics.total_listening_time)} label="Listening Time" />
+              <StatCard value={period === 'all' ? analytics.total_plays : (periodData?.total_plays ?? 0)} label="Total Plays" />
+              <StatCard value={fmtListeningTime(period === 'all' ? analytics.total_listening_time : (periodData?.total_listening_time || 0))} label="Listening Time" />
             </div>
 
             <div className="section-sub">Top Songs</div>

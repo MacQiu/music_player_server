@@ -1,8 +1,9 @@
 import { useState, useRef, useMemo } from 'react';
-import { uploadSong, deleteCoverFile } from '../api/client';
+import { uploadSong, createBlankSong, deleteCoverFile } from '../api/client';
 
 export default function UploadModal({ onClose, onUploaded, songs = [] }) {
   const [file, setFile] = useState(null);
+  const [placeholder, setPlaceholder] = useState(false);
   const [cover, setCover] = useState(null);
   const [coverPreview, setCoverPreview] = useState(null);
   const [title, setTitle] = useState('');
@@ -58,14 +59,20 @@ export default function UploadModal({ onClose, onUploaded, songs = [] }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!file) {
+    if (!placeholder && !file) {
       setStatus({ ok: false, msg: 'Select an audio file first' });
       return;
     }
+    if (placeholder && !title.trim()) {
+      setStatus({ ok: false, msg: 'A placeholder needs a title' });
+      return;
+    }
     setUploading(true);
-    setStatus({ ok: true, msg: 'Uploading...' });
+    setStatus({ ok: true, msg: placeholder ? 'Saving placeholder...' : 'Uploading...' });
     try {
-      const data = await uploadSong(file, { title, artist, album }, cover);
+      const data = placeholder
+        ? await createBlankSong({ title, artist, album }, cover)
+        : await uploadSong(file, { title, artist, album }, cover);
       setStatus({ ok: true, msg: `Uploaded "${data.title}"` });
       setFile(null);
       setCover(null);
@@ -86,7 +93,7 @@ export default function UploadModal({ onClose, onUploaded, songs = [] }) {
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">
-          <h3>Upload Song</h3>
+          <h3>{placeholder ? 'Add Placeholder' : 'Upload Song'}</h3>
           <button className="modal__close" onClick={onClose}>&times;</button>
         </div>
         <form onSubmit={handleSubmit} className="modal__body">
@@ -119,7 +126,13 @@ export default function UploadModal({ onClose, onUploaded, songs = [] }) {
               )}
             </div>
             <div className="upload-modal__fields">
-              <input type="file" accept=".mp3,.wav" onChange={(e) => setFile(e.target.files[0])} />
+              <label style={{ display: 'flex', alignItems: 'center', gap: '.4rem', fontSize: '.85rem' }}>
+                <input type="checkbox" checked={placeholder} onChange={(e) => setPlaceholder(e.target.checked)} />
+                Placeholder (cover only, no audio)
+              </label>
+              {!placeholder && (
+                <input type="file" accept=".mp3,.wav" onChange={(e) => setFile(e.target.files[0])} />
+              )}
               <input placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
               <input placeholder="Artist" value={artist} onChange={(e) => setArtist(e.target.value)} />
               <input placeholder="Album" value={album} onChange={(e) => setAlbum(e.target.value)} />
@@ -143,7 +156,7 @@ export default function UploadModal({ onClose, onUploaded, songs = [] }) {
           )}
           <div className="modal__footer">
             <button type="submit" className="btn btn--primary" disabled={uploading}>
-              {uploading ? 'Uploading...' : 'Upload'}
+              {uploading ? 'Saving...' : (placeholder ? 'Add Placeholder' : 'Upload')}
             </button>
           </div>
           {status && (

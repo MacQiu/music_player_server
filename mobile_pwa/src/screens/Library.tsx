@@ -181,6 +181,7 @@ export default function LibraryScreen() {
   const sortPills: [string, string][] = [['title', 'Title'], ['artist', 'Artist'], ['duration', 'Duration']];
 
   const songSubtitle = (s: Song) => {
+    if (s.is_blank) return 'No audio';
     const p = downloadProgress[s.id];
     if (p !== undefined) return `Downloading... ${Math.round(p * 100)}%`;
     return !s.downloaded ? 'Not Downloaded' : undefined;
@@ -228,7 +229,7 @@ export default function LibraryScreen() {
                   onPress={() => playSong(item.song, songs)}
                   onLongPress={() => multiSelect.enterSelectionMode(item.song.id)}
                   imgVersion={imgVersion}
-                  dimmed={!item.song.downloaded}
+                  dimmed={!item.song.downloaded || !!item.song.is_blank}
                   subtitle={songSubtitle(item.song)}
                   selectionMode={multiSelect.selectionMode}
                   selected={multiSelect.isSelected(item.song.id)}

@@ -236,6 +236,9 @@ All responses are JSON. Errors look like `{"error": "..."}`.
 |--------|------|-------------|
 | `GET` | `/analytics` | Top songs, top artists, totals, 5 random recommendations from top 15, 30-day play history |
 | `GET` | `/analytics/wrapped?year=YYYY` | Yearly stats (Dec 1 of year-1 to Nov 30 of year): top songs, top artists, total plays and time |
+| `GET` | `/analytics/periods?type=week\|month\|year&key=` | Stored week/month/year snapshots. Week and month are kept for the current calendar year only; yearly snapshots are kept permanently |
+| `POST` | `/songs/blank` | Create a placeholder song (title, artist, album, optional cover) with no audio |
+| `POST` | `/songs/<id>/audio` | Attach an `.mp3` or `.wav` to a placeholder. Keeps the same song, cover, and lyrics, and clears the placeholder flag |
 
 ### Lyrics (Multi-Set)
 
@@ -261,7 +264,10 @@ All responses are JSON. Errors look like `{"error": "..."}`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/wrapped/<year>/playlist` | Auto-generate a "Your YYYY Playback" playlist from most-played songs of that year |
+| `POST` | `/wrapped/<year>/playlist` | Server-side generate a "Your YYYY Playback" playlist from plays through Nov 30. Clients cannot create or edit these playlists |
+| `GET` | `/wrapped/status` | Wrapped deadline, last sync, and whether to remind the user to sync |
+| `GET` | `/admin/export` | Zip of `data/music.db` and `storage/` |
+| `POST` | `/admin/import` | Replace this library with an export zip |
 
 ### Dev Tools
 
@@ -563,6 +569,12 @@ orange repeat-one style).
 - Max upload: 100 MB. Only `.mp3` and `.wav` audio. Cover images accept
   `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`.
 - `data/music.db` and `storage/` are gitignored; delete them to reset.
+
+## Move to another laptop
+
+1. On the current laptop, open Server controls and choose **Export Library**. That downloads `spectrum-library.zip` (`data/music.db` plus `storage/`).
+2. On the new laptop, clone this repo and start an empty server with `python app.py`.
+3. Open Server controls and choose **Import Library**. Confirm the overwrite, then pick the zip. The new server replaces its database and audio, covers, and lyrics.
 - Shuffle uses Fisher-Yates to randomize the queue within the source list.
 - Cover images can be set for existing songs via the right-click (desktop)
   or "..." menu (mobile) using the "Set Cover" option.

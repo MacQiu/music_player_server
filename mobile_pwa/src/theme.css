@@ -133,21 +133,22 @@ img { display: block; -webkit-user-drag: none; user-select: none; }
 /* ---------- App shell / tabs ---------- */
 
 .app { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
-.tab-content { flex: 1; position: relative; min-height: 0; }
+.tab-content { flex: 1; position: relative; min-height: 0; overflow: hidden; isolation: isolate; }
 .tab-scene { position: absolute; inset: 0; display: flex; flex-direction: column; }
 
 .tab-footer { flex-shrink: 0; background: var(--bg); }
 .tab-bar {
   display: flex;
-  background: var(--surface);
+  align-items: flex-end;
+  background: var(--bg);
   border-top: 1px solid var(--hairline);
-  padding-top: 8px;
-  padding-bottom: max(var(--safe-bottom), 8px);
+  padding-top: 2px;
+  padding-bottom: 2px;
 }
 .tab-item {
   flex: 1;
   flex-direction: column;
-  padding: 4px 0;
+  padding: 2px 0 0;
   color: var(--text-muted);
 }
 .tab-item.focused { color: #fff; }
@@ -321,6 +322,16 @@ img { display: block; -webkit-user-drag: none; user-select: none; }
   overflow: hidden;
   animation: slide-up 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+.modal-layer.docked {
+  position: absolute;
+}
+.modal-layer.docked.dismissing,
+.modal-layer.docked.dismissing.closing {
+  animation: none;
+}
+.modal-layer.docked .modal-body {
+  padding-bottom: var(--sp-lg);
+}
 .modal-layer.closing { animation: slide-down 0.26s ease-in forwards; }
 @keyframes slide-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
 @keyframes slide-down { from { transform: translateY(0); } to { transform: translateY(100%); } }
@@ -335,7 +346,7 @@ img { display: block; -webkit-user-drag: none; user-select: none; }
 }
 .modal-header-title { flex: 1; font-size: var(--fs-lg); font-weight: 700; }
 .modal-header .icon-btn { color: var(--text-muted); }
-.modal-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: calc(40px + var(--safe-bottom)); }
+.modal-body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: calc(40px + var(--safe-bottom)); }
 
 /* ---------- Form controls ---------- */
 

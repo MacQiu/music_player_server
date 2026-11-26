@@ -6,6 +6,7 @@ import { usePlayer } from '../contexts/PlayerContext';
 import { useNav } from '../navigation/Navigator';
 import { createPlaylist } from '../api/client';
 import { isPlaybackPlaylist } from '../utils/format';
+import WrappedSyncBanner from '../components/WrappedSyncBanner';
 
 function HorizontalCard({ title, coverUrl, songId, onPress, imgVersion }: any) {
   return (
@@ -111,6 +112,7 @@ export default function HomeScreen() {
         <div className="greeting-gradient">
           <div className="greeting">{greeting()}</div>
         </div>
+        <WrappedSyncBanner />
 
         {topTracks.length > 0 && (
           <div className="top-grid">

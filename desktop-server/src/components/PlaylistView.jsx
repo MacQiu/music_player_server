@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { getPlaylist, removeSongFromPlaylist, addSongToPlaylist, reorderPlaylistSongs, updatePlaylist, deletePlaylist } from '../api/client';
+import { getPlaylist, removeSongFromPlaylist, addSongToPlaylist, reorderPlaylistSongs, updatePlaylist, deletePlaylist, uploadCover } from '../api/client';
 import SongView, { TableHeader } from './SongView';
+import SongContextMenu from './SongContextMenu';
+import { useAttachAudio } from './useAttachAudio';
 
 export default function PlaylistView({
-  playlistId, onBack, songs, playSong, addToQueue,
-  currentSong, refreshPlaylists, refreshSongs, imgVersion,
+  playlistId, onBack, songs, playlists = [], playSong, addToQueue,
+  manualQueue, removeFromQueue,
+  currentSong, refreshPlaylists, refreshSongs, imgVersion, bumpImgVersion,
 }) {
   const [playlist, setPlaylist] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -15,8 +18,11 @@ export default function PlaylistView({
   const [scrolled, setScrolled] = useState(false);
   const [pvDragIdx, setPvDragIdx] = useState(null);
   const [pvDragOverIdx, setPvDragOverIdx] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null);
   const containerRef = useRef(null);
   const nameInputRef = useRef(null);
+  const coverInputRef = useRef(null);
+  const coverSongIdRef = useRef(null);
 
   const isWrapped = playlist?.is_wrapped || false;
   const iv = imgVersion ? `?v=${imgVersion}` : '';
@@ -79,7 +85,9 @@ export default function PlaylistView({
 
   const handlePlayAll = () => {
     if (!playlist || playlist.songs.length === 0) return;
-    playSong(playlist.songs[0], playlist.songs);
+    const playable = playlist.songs.filter(s => !s.is_blank);
+    if (playable.length === 0) return;
+    playSong(playable[0], playable);
   };
 
   const handleDragStart = (e, idx) => {
@@ -103,6 +111,49 @@ export default function PlaylistView({
   };
   const handlePvDragEnd = () => { setPvDragIdx(null); setPvDragOverIdx(null); };
 
+  const { openPicker, input: audioInput } = useAttachAudio(async () => {
+    await fetchPlaylist();
+    refreshSongs?.();
+  });
+
+  const handleContext = (e, song) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, song });
+  };
+
+  const handleSetCover = (songId) => {
+    coverSongIdRef.current = songId;
+    setContextMenu(null);
+    setTimeout(() => coverInputRef.current?.click(), 0);
+  };
+
+  const handleCoverFile = async (e) => {
+    const file = e.target.files?.[0];
+    const songId = coverSongIdRef.current;
+    e.target.value = '';
+    coverSongIdRef.current = null;
+    if (!file || !songId) return;
+    try {
+      await uploadCover(songId, file);
+      await fetchPlaylist();
+      refreshSongs?.();
+      bumpImgVersion?.();
+    } catch { /* ignore */ }
+  };
+
+  const handleAddToPlaylist = async (targetId, songId) => {
+    try { await addSongToPlaylist(targetId, songId); } catch { /* ignore */ }
+    setContextMenu(null);
+    if (targetId === playlistId) fetchPlaylist();
+    refreshPlaylists?.();
+  };
+
+  const handleRemoveFromQueue = (songId) => {
+    const idx = manualQueue?.findIndex(s => s.id === songId);
+    if (idx >= 0) removeFromQueue(idx);
+    setContextMenu(null);
+  };
+
   const playlistSongIds = new Set(playlist?.songs?.map(s => s.id) || []);
   const availableSongs = songs.filter(s =>
     !playlistSongIds.has(s.id) &&
@@ -122,18 +173,6 @@ export default function PlaylistView({
     return `${m} min ${s} sec`;
   };
 
-  const fmtListeningTime = (secs) => {
-    if (!secs) return '0s';
-    const h = Math.floor(secs / 3600);
-    const m = Math.floor((secs % 3600) / 60);
-    const s = Math.floor(secs % 60);
-    const parts = [];
-    if (h) parts.push(`${h}h`);
-    if (m) parts.push(`${m}m`);
-    parts.push(`${s}s`);
-    return parts.join(' ');
-  };
-
   const totalDuration = playlist?.songs?.reduce((acc, s) => acc + (s.duration || 0), 0) || 0;
 
   if (loading) {
@@ -150,7 +189,9 @@ export default function PlaylistView({
   }
 
   return (
-    <div className="pv" ref={containerRef}>
+    <div className="pv" ref={containerRef} onClick={() => setContextMenu(null)}>
+      {audioInput}
+      <input type="file" ref={coverInputRef} accept="image/*" style={{ display: 'none' }} onChange={handleCoverFile} />
       {scrolled && (
         <div className="pv__sticky-header pv__sticky-header--visible">
           <button className="pv__back" onClick={onBack}>
@@ -232,8 +273,8 @@ export default function PlaylistView({
       )}
 
       <TableHeader
-        fields={isWrapped ? ['#', 'Title', '', '', 'Plays', 'Time', ''] : ['#', 'Title', 'Artist', 'Album', '', 'Duration', '']}
-        weights={isWrapped ? [1, 8, 0, 0, 2, 2, 1] : [1, 8, 5, 5, 1, 2, 1]}
+        fields={isWrapped ? ['#', 'Title', '', '', 'Plays', '', ''] : ['#', 'Title', 'Artist', 'Album', '', 'Duration', '']}
+        weights={isWrapped ? [1, 8, 0, 0, 2, 1, 1] : [1, 8, 5, 5, 1, 2, 1]}
       />
 
       <div className="pv__songs">
@@ -245,10 +286,11 @@ export default function PlaylistView({
             isActive={currentSong?.id === song.id}
             onPlay={() => playSong(song, playlist.songs)}
             onDoubleClick={() => playSong(song, playlist.songs)}
+            onContextMenu={(e) => handleContext(e, song)}
             showArtist={!isWrapped}
             showAlbum={!isWrapped}
             showDuration={!isWrapped}
-            weights={isWrapped ? [1, 8, 0, 0, 2, 2, 1] : [1, 8, 5, 5, 1, 2, 1]}
+            weights={isWrapped ? [1, 8, 0, 0, 2, 1, 1] : [1, 8, 5, 5, 1, 2, 1]}
             imgVersion={imgVersion}
             draggable={!isWrapped}
             onDragStart={!isWrapped ? (e) => handleDragStart(e, idx) : undefined}
@@ -261,7 +303,6 @@ export default function PlaylistView({
               isWrapped ? (
                 <div className="pv__song-stats">
                   <span>{song.play_count || 0} plays</span>
-                  <span>{fmtListeningTime(song.total_time)}</span>
                 </div>
               ) : (
                 <div className="sv-actions">
@@ -278,6 +319,19 @@ export default function PlaylistView({
           <p className="muted" style={{ padding: '2rem', textAlign: 'center' }}>No songs in this playlist</p>
         )}
       </div>
+
+      <SongContextMenu
+        menu={contextMenu}
+        onClose={() => setContextMenu(null)}
+        onPlay={(song) => playSong(song, playlist.songs)}
+        onAddToQueue={addToQueue}
+        onRemoveFromQueue={handleRemoveFromQueue}
+        inQueue={!!contextMenu && manualQueue?.some(s => s.id === contextMenu.song.id)}
+        onSetCover={handleSetCover}
+        onAddAudio={(songId) => { setContextMenu(null); openPicker(songId); }}
+        playlists={playlists}
+        onAddToPlaylist={handleAddToPlaylist}
+      />
     </div>
   );
 }

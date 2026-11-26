@@ -1,18 +1,25 @@
 import { useMemo, useRef, useState } from 'react';
-import { uploadArtistImage } from '../api/client';
+import { uploadArtistImage, uploadCover, addSongToPlaylist } from '../api/client';
 import SongView from './SongView';
 import GridCard, { SectionHeader } from './GridCard';
+import SongContextMenu from './SongContextMenu';
+import { useAttachAudio } from './useAttachAudio';
 
 export default function ArtistView({
-  artistName, onBack, songs, artists, playSong, addToQueue,
-  currentSong, refreshArtists, onOpenPlaylist,
+  artistName, onBack, songs, artists, playlists = [], playSong, addToQueue,
+  manualQueue, removeFromQueue,
+  currentSong, refreshArtists, refreshSongs, onOpenPlaylist,
   imgVersion, bumpImgVersion,
 }) {
   const artist = artists.find(a => a.name === artistName);
   const artistSongs = useMemo(() => songs.filter(s => s.artist === artistName), [songs, artistName]);
   const imageInputRef = useRef(null);
+  const coverInputRef = useRef(null);
+  const coverSongIdRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [contextMenu, setContextMenu] = useState(null);
+  const { openPicker, input: audioInput } = useAttachAudio(() => refreshSongs?.());
 
   const iv = imgVersion ? `?v=${imgVersion}` : '';
 
@@ -51,9 +58,46 @@ export default function ArtistView({
 
   const displaySongs = showAll ? artistSongs : artistSongs.slice(0, 5);
 
+  const handleContext = (e, song) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, song });
+  };
+
+  const handleSetCover = (songId) => {
+    coverSongIdRef.current = songId;
+    setContextMenu(null);
+    setTimeout(() => coverInputRef.current?.click(), 0);
+  };
+
+  const handleCoverFile = async (e) => {
+    const file = e.target.files?.[0];
+    const songId = coverSongIdRef.current;
+    e.target.value = '';
+    coverSongIdRef.current = null;
+    if (!file || !songId) return;
+    try {
+      await uploadCover(songId, file);
+      refreshSongs?.();
+      bumpImgVersion?.();
+    } catch { /* ignore */ }
+  };
+
+  const handleAddToPlaylist = async (playlistId, songId) => {
+    try { await addSongToPlaylist(playlistId, songId); } catch { /* ignore */ }
+    setContextMenu(null);
+  };
+
+  const handleRemoveFromQueue = (songId) => {
+    const idx = manualQueue?.findIndex(s => s.id === songId);
+    if (idx >= 0) removeFromQueue(idx);
+    setContextMenu(null);
+  };
+
   return (
-    <div className="av">
+    <div className="av" onClick={() => setContextMenu(null)}>
       <input type="file" ref={imageInputRef} accept="image/*" style={{ display: 'none' }} onChange={handleImageUpload} />
+      <input type="file" ref={coverInputRef} accept="image/*" style={{ display: 'none' }} onChange={handleCoverFile} />
+      {audioInput}
 
       <div className="av__hero" style={imgUrl ? { backgroundImage: `url(${imgUrl})` } : {}}>
         <div className="av__hero-overlay" />
@@ -91,6 +135,7 @@ export default function ArtistView({
                 isActive={currentSong?.id === song.id}
                 onPlay={() => playSong(song, artistSongs)}
                 onDoubleClick={() => playSong(song, artistSongs)}
+                onContextMenu={(e) => handleContext(e, song)}
                 showArtist={false}
                 showAlbum
                 showDuration
@@ -133,6 +178,19 @@ export default function ArtistView({
           </section>
         )}
       </div>
+
+      <SongContextMenu
+        menu={contextMenu}
+        onClose={() => setContextMenu(null)}
+        onPlay={(song) => playSong(song, artistSongs)}
+        onAddToQueue={addToQueue}
+        onRemoveFromQueue={handleRemoveFromQueue}
+        inQueue={!!contextMenu && manualQueue?.some(s => s.id === contextMenu.song.id)}
+        onSetCover={handleSetCover}
+        onAddAudio={(songId) => { setContextMenu(null); openPicker(songId); }}
+        playlists={playlists}
+        onAddToPlaylist={handleAddToPlaylist}
+      />
     </div>
   );
 }

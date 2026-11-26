@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { IconType } from 'react-icons';
 import { IoHome, IoMusicalNotes, IoBarChart, IoSync } from 'react-icons/io5';
 import { PlayerProvider } from './contexts/PlayerContext';
@@ -79,7 +79,11 @@ function TabBar() {
   );
 }
 
+const DOCKED_ROUTES = new Set(['playlist', 'artist']);
+
 function ModalLayer({ entry, index }: { entry: StackEntry; index: number }) {
+  const { back } = useNav();
+  const layerRef = useRef<HTMLDivElement>(null);
   const r = entry.route;
   let content: ReactNode = null;
   switch (r.name) {
@@ -91,8 +95,94 @@ function ModalLayer({ entry, index }: { entry: StackEntry; index: number }) {
     case 'playlist': content = <PlaylistScreen id={r.id} />; break;
     case 'artist': content = <ArtistScreen artistName={r.artist} />; break;
   }
+  const docked = DOCKED_ROUTES.has(r.name);
+
+  useEffect(() => {
+    if (!docked) return;
+    const layer = layerRef.current;
+    if (!layer) return;
+    let startY = 0;
+    let startX = 0;
+    let tracking = false;
+    let pulled = 0;
+
+    const atTop = () => {
+      const body = layer.querySelector('.modal-body');
+      return !body || body.scrollTop <= 2;
+    };
+
+    const onStart = (e: TouchEvent) => {
+      if (layer.querySelector('.edit-banner, .sheet-backdrop')) return;
+      const target = e.target as Element;
+      if (target.closest('.selection-bar, input, textarea')) return;
+      if (!atTop()) return;
+      startY = e.touches[0].clientY;
+      startX = e.touches[0].clientX;
+      tracking = true;
+      pulled = 0;
+    };
+
+    const onMove = (e: TouchEvent) => {
+      if (!tracking) return;
+      if (!atTop()) {
+        tracking = false;
+        layer.style.transform = '';
+        return;
+      }
+      const dy = e.touches[0].clientY - startY;
+      const dx = e.touches[0].clientX - startX;
+      if (pulled === 0 && Math.abs(dx) > Math.abs(dy)) {
+        tracking = false;
+        return;
+      }
+      if (dy <= 0) {
+        pulled = 0;
+        layer.style.transform = '';
+        return;
+      }
+      pulled = dy;
+      layer.style.animation = 'none';
+      layer.style.transform = `translateY(${dy}px)`;
+      if (e.cancelable) e.preventDefault();
+    };
+
+    const onEnd = () => {
+      if (!tracking) return;
+      tracking = false;
+      if (pulled > 90) {
+        layer.classList.add('dismissing');
+        layer.style.transition = 'transform .22s ease-in';
+        layer.style.transform = 'translateY(100%)';
+        window.setTimeout(() => back(), 180);
+      } else {
+        layer.style.transition = 'transform .2s ease';
+        layer.style.transform = '';
+        window.setTimeout(() => {
+          layer.style.transition = '';
+          layer.style.animation = '';
+        }, 200);
+      }
+      pulled = 0;
+    };
+
+    layer.addEventListener('touchstart', onStart, { passive: true });
+    layer.addEventListener('touchmove', onMove, { passive: false });
+    layer.addEventListener('touchend', onEnd);
+    layer.addEventListener('touchcancel', onEnd);
+    return () => {
+      layer.removeEventListener('touchstart', onStart);
+      layer.removeEventListener('touchmove', onMove);
+      layer.removeEventListener('touchend', onEnd);
+      layer.removeEventListener('touchcancel', onEnd);
+    };
+  }, [docked, back]);
+
   return (
-    <div className={`modal-layer ${entry.closing ? 'closing' : ''}`} style={{ zIndex: 100 + index }}>
+    <div
+      ref={layerRef}
+      className={`modal-layer ${docked ? 'docked' : ''} ${entry.closing ? 'closing' : ''}`}
+      style={{ zIndex: 100 + index }}
+    >
       {content}
     </div>
   );
@@ -106,6 +196,9 @@ function Shell() {
     setMounted(prev => (prev.has(tab) ? prev : new Set([...prev, tab])));
   }, [tab]);
 
+  const docked = stack.filter(entry => DOCKED_ROUTES.has(entry.route.name));
+  const fullscreen = stack.filter(entry => !DOCKED_ROUTES.has(entry.route.name));
+
   return (
     <div className="app">
       <div className="tab-content">
@@ -113,9 +206,10 @@ function Shell() {
         {mounted.has('library') && <div className="tab-scene" hidden={tab !== 'library'}><LibraryScreen /></div>}
         {mounted.has('analytics') && <div className="tab-scene" hidden={tab !== 'analytics'}><AnalyticsScreen /></div>}
         {mounted.has('sync') && <div className="tab-scene" hidden={tab !== 'sync'}><SyncScreen /></div>}
+        {docked.map(entry => <ModalLayer key={entry.key} entry={entry} index={stack.indexOf(entry)} />)}
       </div>
       <TabBar />
-      {stack.map((entry, i) => <ModalLayer key={entry.key} entry={entry} index={i} />)}
+      {fullscreen.map(entry => <ModalLayer key={entry.key} entry={entry} index={stack.indexOf(entry)} />)}
     </div>
   );
 }

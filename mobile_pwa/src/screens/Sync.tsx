@@ -14,6 +14,7 @@ import { getDownloadedBytes } from '../storage/songStorage';
 import { fmtBytes } from '../utils/format';
 import { Colors } from '../constants/theme';
 import type { Song } from '../types';
+import WrappedSyncBanner from '../components/WrappedSyncBanner';
 
 export default function SyncScreen() {
   const {
@@ -76,7 +77,7 @@ export default function SyncScreen() {
 
   const downloadAll = async () => {
     if (!online) { alert('Connect to the server to download songs.'); return; }
-    const missing = songs.filter(s => !s.downloaded);
+    const missing = songs.filter(s => !s.downloaded && !s.is_blank);
     if (missing.length === 0) { setDownloadAllResult('Everything is already downloaded'); return; }
     if (!confirm(`Download ${missing.length} song${missing.length !== 1 ? 's' : ''} to this device?`)) return;
     setLoading(l => ({ ...l, downloadAll: true }));
@@ -109,6 +110,7 @@ export default function SyncScreen() {
     <ScrollPage onRefresh={onRefresh}>
       <div className="page-pad">
         <h1 className="heading">Sync</h1>
+        <WrappedSyncBanner />
 
         <div className="rows">
           <button className="row-card" onClick={checkServer} disabled={loading.server}>

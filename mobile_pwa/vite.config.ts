@@ -32,9 +32,12 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,png,svg,woff,woff2}'],
         navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/\/local-audio\//],
+        importScripts: ['local-audio-sw.js'],
         // Server data lives in IndexedDB; never let the SW cache API responses.
         runtimeCaching: [],
       },
+      devOptions: { enabled: true },
     }),
   ],
   server: { port: 5173 },

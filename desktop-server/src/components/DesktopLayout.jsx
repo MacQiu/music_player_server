@@ -12,6 +12,7 @@ import DesktopHome from '../pages/DesktopHome';
 import DesktopLibrary from '../pages/DesktopLibrary';
 import DesktopAnalytics from '../pages/DesktopAnalytics';
 import DesktopDevTools from '../pages/DesktopDevTools';
+import { getWrappedStatus } from '../api/client';
 
 export default function DesktopLayout({
   songs, analytics, playlists, artists, online,
@@ -28,6 +29,14 @@ export default function DesktopLayout({
   reorderQueue, toggleRepeat, toggleShuffle, handleSongEnd, jumpToQueueIndex,
 }) {
   const [view, setView] = useState({ page: 'home' });
+  const [wrappedNote, setWrappedNote] = useState(null);
+
+  useEffect(() => {
+    if (view.page !== 'home' && view.page !== 'analytics') return;
+    getWrappedStatus()
+      .then(d => setWrappedNote(d.should_notify ? d.message : null))
+      .catch(() => setWrappedNote(null));
+  }, [online, view.page]);
   const [viewHistory, setViewHistory] = useState([]);
   const [showUpload, setShowUpload] = useState(false);
   const [showServer, setShowServer] = useState(false);
@@ -141,15 +150,17 @@ export default function DesktopLayout({
         return <DesktopDevTools songs={songs} onRefreshAnalytics={onRefreshAnalytics} onRefreshPlaylists={onRefreshPlaylists} />;
       case 'playlist':
         return <PlaylistView playlistId={view.id} onBack={goBack}
-          songs={songs} playSong={playSong} addToQueue={addToQueue}
+          songs={songs} playlists={playlists} playSong={playSong} addToQueue={addToQueue}
+          manualQueue={manualQueue} removeFromQueue={removeFromQueue}
           currentSong={currentSong}
           refreshPlaylists={onRefreshPlaylists} refreshSongs={refreshSongs}
-          imgVersion={imgVersion} />;
+          imgVersion={imgVersion} bumpImgVersion={bumpImgVersion} />;
       case 'artist':
         return <ArtistView artistName={view.name} onBack={goBack}
-          songs={songs} artists={artists} playSong={playSong} addToQueue={addToQueue}
+          songs={songs} artists={artists} playlists={playlists} playSong={playSong} addToQueue={addToQueue}
+          manualQueue={manualQueue} removeFromQueue={removeFromQueue}
           currentSong={currentSong}
-          refreshArtists={refreshArtists} onOpenPlaylist={handleOpenPlaylist}
+          refreshArtists={refreshArtists} refreshSongs={refreshSongs} onOpenPlaylist={handleOpenPlaylist}
           imgVersion={imgVersion} bumpImgVersion={bumpImgVersion} />;
       case 'search':
         return <SearchView songs={songs} artists={artists} playlists={playlists}
@@ -219,6 +230,11 @@ export default function DesktopLayout({
         </div>
 
         <main className="desktop__main" ref={mainRef}>
+          {(view.page === 'home' || view.page === 'analytics') && wrappedNote && (
+            <div style={{ margin: '1rem 1.5rem 0', background: '#3a2a00', color: '#ffe08a', padding: '.75rem 1rem', borderRadius: 8 }}>
+              {wrappedNote}
+            </div>
+          )}
           {renderMain()}
         </main>
 

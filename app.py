@@ -13,17 +13,20 @@ Listens on http://0.0.0.0:5000
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import logging
 import os
 import random
 import re
+import sqlite3
 import time
+import zipfile
 from urllib.parse import quote as url_quote
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
-from flask import Flask, g, jsonify, request, send_from_directory
+from flask import Flask, g, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
@@ -39,9 +42,78 @@ LYRICS_DIR = os.path.join(BASE_DIR, "storage", "lyrics")
 COVERS_DIR = os.path.join(BASE_DIR, "storage", "covers")
 ARTISTS_DIR = os.path.join(BASE_DIR, "storage", "artists")
 
-MAX_CONTENT_LENGTH = 100 * 1024 * 1024
+MAX_CONTENT_LENGTH = 4 * 1024 * 1024 * 1024
+AUDIO_UPLOAD_LIMIT = 100 * 1024 * 1024
 
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+
+
+def _safe_lyrics_name(text: str) -> str:
+    return re.sub(r'[<>:"/\\|?*]', "_", text).strip().rstrip(".") or "unknown"
+
+
+def _lyrics_folder(song_id: str, title: str, artist: str | None) -> str:
+    base = f"{title} - {artist}" if artist else (title or song_id)
+    return os.path.join(LYRICS_DIR, _safe_lyrics_name(base) or song_id)
+
+
+def _lyrics_filename(label: str) -> str:
+    return f"Lyrics - {_safe_lyrics_name(label) or 'default'}.lrc"
+
+
+def _colors_filename(label: str) -> str:
+    return f"Lyrics - {_safe_lyrics_name(label) or 'default'}.colors.json"
+
+
+def _lrc_has_text(path: str) -> bool:
+    if not os.path.isfile(path):
+        return False
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return bool(fh.read().strip())
+    except OSError:
+        return False
+
+
+def purge_empty_lyric_sets(conn, song_id: str | None = None) -> None:
+    """Drop lyric-set rows whose file is missing or blank. Recycle leftover files."""
+    sql = (
+        "SELECT ls.id, ls.song_id, ls.label, s.title, s.artist "
+        "FROM lyric_sets ls JOIN songs s ON s.id = ls.song_id"
+    )
+    params: tuple = ()
+    if song_id:
+        sql += " WHERE ls.song_id = ?"
+        params = (song_id,)
+    rows = list(conn.execute(sql, params))
+    folders: dict[str, str] = {}
+    for row in rows:
+        folder = _lyrics_folder(row["song_id"], row["title"], row["artist"])
+        folders[row["song_id"]] = folder
+        path = os.path.join(folder, _lyrics_filename(row["label"]))
+        if _lrc_has_text(path):
+            continue
+        for extra in (path, os.path.join(folder, _colors_filename(row["label"]))):
+            if os.path.isfile(extra):
+                try:
+                    utils.recycle_path(extra)
+                except OSError as e:
+                    logging.getLogger("music_server").warning(
+                        "Could not recycle %s: %s", extra, e
+                    )
+        conn.execute("DELETE FROM lyric_sets WHERE id = ?", (row["id"],))
+    for sid, folder in folders.items():
+        still = conn.execute(
+            "SELECT 1 FROM lyric_sets WHERE song_id = ? LIMIT 1", (sid,)
+        ).fetchone()
+        if still or not os.path.isdir(folder):
+            continue
+        try:
+            utils.recycle_path(folder)
+        except OSError as e:
+            logging.getLogger("music_server").warning(
+                "Could not recycle lyrics dir %s: %s", folder, e
+            )
 
 
 def _allowed_image(filename: str) -> bool:
@@ -65,6 +137,24 @@ def _save_cover(file_storage, song_id: str = "") -> str | None:
     return os.path.relpath(abs_path, BASE_DIR).replace("\\", "/")
 
 
+def _backfill_missing_durations(conn) -> None:
+    """Fill durations that were never stored, using the audio file on disk."""
+    rows = conn.execute(
+        "SELECT id, file_path FROM songs "
+        "WHERE duration IS NULL AND IFNULL(file_path, '') != '' AND IFNULL(is_blank, 0) = 0"
+    ).fetchall()
+    for row in rows:
+        abs_path = os.path.join(BASE_DIR, row["file_path"])
+        if not os.path.isfile(abs_path):
+            continue
+        _, _, _, duration = utils.extract_metadata(abs_path)
+        if duration:
+            conn.execute(
+                "UPDATE songs SET duration = ? WHERE id = ?",
+                (duration, row["id"]),
+            )
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
@@ -77,6 +167,11 @@ def create_app() -> Flask:
     for d in (SONGS_DIR, LYRICS_DIR, COVERS_DIR, ARTISTS_DIR):
         os.makedirs(d, exist_ok=True)
     db.init_db()
+    with db.get_conn() as conn:
+        purge_empty_lyric_sets(conn)
+        _backfill_missing_durations(conn)
+        db.refresh_period_snapshots(conn)
+        db.maybe_generate_wrapped(conn)
 
     logging.basicConfig(
         level=logging.INFO,
@@ -124,7 +219,7 @@ def create_app() -> Flask:
     def list_songs():
         with db.get_conn() as conn:
             rows = conn.execute(
-                "SELECT id, title, artist, album, duration, file_path, cover_path, sort_order, date_added, downloaded "
+                "SELECT id, title, artist, album, duration, file_path, cover_path, sort_order, date_added, downloaded, is_blank "
                 "FROM songs ORDER BY sort_order ASC, date_added DESC"
             ).fetchall()
         result = []
@@ -149,6 +244,8 @@ def create_app() -> Flask:
 
     @app.post("/upload")
     def upload():
+        if request.content_length and request.content_length > AUDIO_UPLOAD_LIMIT:
+            return jsonify({"error": "audio upload exceeds 100 MB"}), 413
         if "file" not in request.files:
             return jsonify({"error": "missing 'file' form field"}), 400
         f = request.files["file"]
@@ -220,14 +317,105 @@ def create_app() -> Flask:
             201,
         )
 
+    @app.post("/songs/blank")
+    def create_blank_song():
+        """Metadata-only song: cover and title, no audio file, cannot be played."""
+        title = (request.form.get("title") or "").strip()
+        if not title:
+            return jsonify({"error": "title is required"}), 400
+        artist = (request.form.get("artist") or "").strip() or None
+        album = (request.form.get("album") or "").strip() or None
+        song_id = utils.new_id()
+        cover_path = _save_cover(request.files.get("cover"), song_id)
+
+        with db.get_conn() as conn:
+            conn.execute(
+                "INSERT INTO songs (id, title, artist, album, duration, file_path, cover_path, is_blank) "
+                "VALUES (?, ?, ?, ?, 0, '', ?, 1)",
+                (song_id, title, artist, album, cover_path),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO analytics (song_id) VALUES (?)",
+                (song_id,),
+            )
+            if artist:
+                conn.execute(
+                    "INSERT OR IGNORE INTO artists (name) VALUES (?)",
+                    (artist,),
+                )
+
+        return jsonify({
+            "id": song_id,
+            "title": title,
+            "artist": artist,
+            "album": album,
+            "duration": 0,
+            "file_path": "",
+            "cover_path": cover_path,
+            "cover_url": f"/covers/{song_id}" if cover_path else None,
+            "is_blank": 1,
+        }), 201
+
+    @app.post("/songs/<song_id>/audio")
+    def attach_audio(song_id: str):
+        """Add the audio file to an existing placeholder and make it playable."""
+        if request.content_length and request.content_length > AUDIO_UPLOAD_LIMIT:
+            return jsonify({"error": "audio upload exceeds 100 MB"}), 413
+        with db.get_conn() as conn:
+            row = conn.execute(
+                "SELECT id, title, artist, album, cover_path, is_blank, file_path "
+                "FROM songs WHERE id = ?",
+                (song_id,),
+            ).fetchone()
+        if not row:
+            return jsonify({"error": "song not found"}), 404
+        if not row["is_blank"] and row["file_path"]:
+            return jsonify({"error": "song already has audio"}), 409
+        if "file" not in request.files:
+            return jsonify({"error": "missing 'file' form field"}), 400
+        f = request.files["file"]
+        if not f.filename:
+            return jsonify({"error": "empty filename"}), 400
+        if not utils.allowed_file(f.filename):
+            return jsonify({"error": "only .mp3 and .wav are allowed"}), 400
+
+        ext = os.path.splitext(f.filename)[1].lower()
+        tmp_path = os.path.join(SONGS_DIR, f"_tmp_{song_id}{ext}")
+        f.save(tmp_path)
+        _, _, _, duration = utils.extract_metadata(tmp_path)
+        stored_name = utils.safe_storage_name(row["title"] or "audio", row["artist"], ext, SONGS_DIR)
+        abs_path = os.path.join(SONGS_DIR, stored_name)
+        os.replace(tmp_path, abs_path)
+        rel_path = os.path.relpath(abs_path, BASE_DIR).replace("\\", "/")
+
+        with db.get_conn() as conn:
+            conn.execute(
+                "UPDATE songs SET file_path = ?, duration = ?, is_blank = 0 WHERE id = ?",
+                (rel_path, duration or 0, song_id),
+            )
+
+        return jsonify({
+            "id": song_id,
+            "title": row["title"],
+            "artist": row["artist"],
+            "album": row["album"],
+            "duration": duration or 0,
+            "file_path": rel_path,
+            "cover_path": row["cover_path"],
+            "cover_url": f"/covers/{song_id}" if row["cover_path"] else None,
+            "is_blank": 0,
+        })
+
     @app.get("/download/<song_id>")
     def download(song_id: str):
         with db.get_conn() as conn:
             row = conn.execute(
-                "SELECT file_path FROM songs WHERE id = ?", (song_id,)
+                "SELECT file_path, is_blank FROM songs WHERE id = ?", (song_id,)
             ).fetchone()
         if not row:
             return jsonify({"error": "song not found"}), 404
+        if row["is_blank"] or not row["file_path"]:
+            return jsonify({"error": "blank songs have no audio"}), 409
 
         abs_path = os.path.join(BASE_DIR, row["file_path"])
         if not os.path.isfile(abs_path):
@@ -281,9 +469,9 @@ def create_app() -> Flask:
                 (cover_rel,),
             )
         try:
-            os.remove(abs_path)
-        except OSError:
-            pass
+            utils.recycle_path(abs_path)
+        except OSError as e:
+            app.logger.warning("Could not recycle cover %s: %s", abs_path, e)
         return jsonify({"ok": True})
 
     # =====================================================================
@@ -394,6 +582,8 @@ def create_app() -> Flask:
         name = (body.get("name") or "").strip()
         if not name:
             return jsonify({"error": "name is required"}), 400
+        if db.is_wrapped_playlist_name(name):
+            return jsonify({"error": "wrapped playlists can only be generated on the server"}), 403
         pid = utils.new_id()
         with db.get_conn() as conn:
             conn.execute("INSERT INTO playlists (id, name) VALUES (?, ?)", (pid, name))
@@ -416,7 +606,7 @@ def create_app() -> Flask:
                 start_date = f"{year - 1}-12-01"
                 end_date = f"{year}-11-30"
                 songs = conn.execute(
-                    "SELECT s.id, s.title, s.artist, s.album, s.duration, "
+                    "SELECT s.id, s.title, s.artist, s.album, s.duration, s.is_blank, "
                     "s.cover_path, ps.position, "
                     "COUNT(p.id) AS play_count, "
                     "COALESCE(SUM(p.duration), 0) AS total_time "
@@ -429,7 +619,7 @@ def create_app() -> Flask:
                 ).fetchall()
             else:
                 songs = conn.execute(
-                    "SELECT s.id, s.title, s.artist, s.album, s.duration, "
+                    "SELECT s.id, s.title, s.artist, s.album, s.duration, s.is_blank, "
                     "s.cover_path, s.date_added, ps.position "
                     "FROM playlist_songs ps JOIN songs s ON s.id = ps.song_id "
                     "WHERE ps.playlist_id = ? ORDER BY ps.position",
@@ -452,18 +642,26 @@ def create_app() -> Flask:
         name = (body.get("name") or "").strip()
         if not name:
             return jsonify({"error": "name is required"}), 400
+        if db.is_wrapped_playlist_name(name):
+            return jsonify({"error": "wrapped playlists can only be generated on the server"}), 403
         with db.get_conn() as conn:
-            cur = conn.execute("UPDATE playlists SET name = ? WHERE id = ?", (name, playlist_id))
-            if cur.rowcount == 0:
+            row = conn.execute("SELECT name FROM playlists WHERE id = ?", (playlist_id,)).fetchone()
+            if not row:
                 return jsonify({"error": "playlist not found"}), 404
+            if db.is_wrapped_playlist_name(row["name"]):
+                return jsonify({"error": "wrapped playlists are read-only"}), 403
+            conn.execute("UPDATE playlists SET name = ? WHERE id = ?", (name, playlist_id))
         return jsonify({"ok": True})
 
     @app.delete("/playlists/<playlist_id>")
     def delete_playlist(playlist_id: str):
         with db.get_conn() as conn:
-            cur = conn.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
-            if cur.rowcount == 0:
+            row = conn.execute("SELECT name FROM playlists WHERE id = ?", (playlist_id,)).fetchone()
+            if not row:
                 return jsonify({"error": "playlist not found"}), 404
+            if db.is_wrapped_playlist_name(row["name"]):
+                return jsonify({"error": "wrapped playlists are read-only"}), 403
+            conn.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
         return jsonify({"ok": True})
 
     @app.post("/playlists/<playlist_id>/songs")
@@ -473,8 +671,11 @@ def create_app() -> Flask:
         if not song_id:
             return jsonify({"error": "song_id is required"}), 400
         with db.get_conn() as conn:
-            if not conn.execute("SELECT 1 FROM playlists WHERE id = ?", (playlist_id,)).fetchone():
+            pl = conn.execute("SELECT name FROM playlists WHERE id = ?", (playlist_id,)).fetchone()
+            if not pl:
                 return jsonify({"error": "playlist not found"}), 404
+            if db.is_wrapped_playlist_name(pl["name"]):
+                return jsonify({"error": "wrapped playlists are read-only"}), 403
             if not conn.execute("SELECT 1 FROM songs WHERE id = ?", (song_id,)).fetchone():
                 return jsonify({"error": "song not found"}), 404
             max_pos = conn.execute(
@@ -490,6 +691,11 @@ def create_app() -> Flask:
     @app.delete("/playlists/<playlist_id>/songs/<song_id>")
     def remove_song_from_playlist(playlist_id: str, song_id: str):
         with db.get_conn() as conn:
+            pl = conn.execute("SELECT name FROM playlists WHERE id = ?", (playlist_id,)).fetchone()
+            if not pl:
+                return jsonify({"error": "playlist not found"}), 404
+            if db.is_wrapped_playlist_name(pl["name"]):
+                return jsonify({"error": "wrapped playlists are read-only"}), 403
             cur = conn.execute(
                 "DELETE FROM playlist_songs WHERE playlist_id = ? AND song_id = ?",
                 (playlist_id, song_id),
@@ -505,6 +711,11 @@ def create_app() -> Flask:
         if not isinstance(song_ids, list):
             return jsonify({"error": "song_ids must be a list"}), 400
         with db.get_conn() as conn:
+            pl = conn.execute("SELECT name FROM playlists WHERE id = ?", (playlist_id,)).fetchone()
+            if not pl:
+                return jsonify({"error": "playlist not found"}), 404
+            if db.is_wrapped_playlist_name(pl["name"]):
+                return jsonify({"error": "wrapped playlists are read-only"}), 403
             for pos, sid in enumerate(song_ids):
                 conn.execute(
                     "UPDATE playlist_songs SET position = ? WHERE playlist_id = ? AND song_id = ?",
@@ -547,15 +758,18 @@ def create_app() -> Flask:
             return jsonify({"error": str(e)}), 400
 
         with db.get_conn() as conn:
-            exists = conn.execute(
-                "SELECT 1 FROM songs WHERE id = ?", (entry["song_id"],)
+            song = conn.execute(
+                "SELECT is_blank FROM songs WHERE id = ?", (entry["song_id"],)
             ).fetchone()
-            if not exists:
+            if not song:
                 return jsonify({"error": "song not found"}), 404
+            if song["is_blank"]:
+                return jsonify({"error": "blank songs cannot be played"}), 409
 
             inserted = db.insert_playlog_and_update_analytics(
                 conn, entry["id"], entry["song_id"], entry["duration"], entry["timestamp"]
             )
+            db.refresh_period_snapshots(conn)
 
         return jsonify({"ok": True, "id": entry["id"], "inserted": inserted})
 
@@ -571,8 +785,9 @@ def create_app() -> Flask:
         errors = []
 
         with db.get_conn() as conn:
-            known_ids = {
-                r["id"] for r in conn.execute("SELECT id FROM songs").fetchall()
+            known = {
+                r["id"]: r["is_blank"]
+                for r in conn.execute("SELECT id, is_blank FROM songs").fetchall()
             }
             for idx, raw in enumerate(logs):
                 try:
@@ -581,8 +796,11 @@ def create_app() -> Flask:
                     errors.append({"index": idx, "error": str(e)})
                     continue
 
-                if entry["song_id"] not in known_ids:
+                if entry["song_id"] not in known:
                     errors.append({"index": idx, "error": "unknown song_id"})
+                    continue
+                if known[entry["song_id"]]:
+                    errors.append({"index": idx, "error": "blank songs cannot be played"})
                     continue
 
                 was_new = db.insert_playlog_and_update_analytics(
@@ -596,6 +814,10 @@ def create_app() -> Flask:
                     inserted += 1
                 else:
                     skipped += 1
+
+            db.touch_last_sync(conn)
+            db.refresh_period_snapshots(conn)
+            db.maybe_generate_wrapped(conn)
 
         return jsonify({"inserted": inserted, "skipped": skipped, "errors": errors})
 
@@ -752,6 +974,30 @@ def create_app() -> Flask:
             }
         )
 
+    @app.get("/analytics/periods")
+    def analytics_periods():
+        period_type = (request.args.get("type") or "month").strip()
+        if period_type not in ("week", "month", "year"):
+            return jsonify({"error": "type must be week, month, or year"}), 400
+        key = (request.args.get("key") or "").strip() or None
+        with db.get_conn() as conn:
+            db.refresh_period_snapshots(conn)
+            keys = db.list_period_keys(conn, period_type)
+            if key is None:
+                key = keys[0] if keys else None
+            snapshot = db.get_period_snapshot(conn, period_type, key) if key else None
+        return jsonify({
+            "type": period_type,
+            "key": key,
+            "keys": keys,
+            "snapshot": snapshot,
+        })
+
+    @app.get("/wrapped/status")
+    def get_wrapped_status():
+        with db.get_conn() as conn:
+            return jsonify(db.wrapped_status(conn))
+
     # =====================================================================
     #  Song deletion
     # =====================================================================
@@ -785,23 +1031,23 @@ def create_app() -> Flask:
             abs_path = os.path.join(BASE_DIR, row["file_path"])
             try:
                 if os.path.isfile(abs_path):
-                    os.remove(abs_path)
+                    utils.recycle_path(abs_path)
             except OSError as e:
-                app.logger.warning("Could not delete file %s: %s", abs_path, e)
+                app.logger.warning("Could not recycle file %s: %s", abs_path, e)
 
         if row["cover_path"] and cover_ref_count == 0:
             abs_path = os.path.join(BASE_DIR, row["cover_path"])
             try:
                 if os.path.isfile(abs_path):
-                    os.remove(abs_path)
+                    utils.recycle_path(abs_path)
             except OSError as e:
-                app.logger.warning("Could not delete cover %s: %s", abs_path, e)
+                app.logger.warning("Could not recycle cover %s: %s", abs_path, e)
 
         if lyrics_dir_to_remove and os.path.isdir(lyrics_dir_to_remove):
             try:
-                shutil.rmtree(lyrics_dir_to_remove)
+                utils.recycle_path(lyrics_dir_to_remove)
             except OSError as e:
-                app.logger.warning("Could not delete lyrics dir %s: %s", lyrics_dir_to_remove, e)
+                app.logger.warning("Could not recycle lyrics dir %s: %s", lyrics_dir_to_remove, e)
 
         return jsonify({"ok": True, "id": song_id})
 
@@ -810,32 +1056,17 @@ def create_app() -> Flask:
     # =====================================================================
 
     def _lyrics_dir(song_id: str) -> str:
-        """Return the human-readable lyrics directory for a song."""
+        """Return the human-readable lyrics directory for a song, creating it."""
         with db.get_conn() as conn:
             row = conn.execute(
                 "SELECT title, artist FROM songs WHERE id = ?", (song_id,)
             ).fetchone()
         if row:
-            base = row["title"]
-            if row["artist"]:
-                base = f"{row['title']} - {row['artist']}"
-            safe = re.sub(r'[<>:"/\\|?*]', "_", base).strip().rstrip(".")
-            name = safe or song_id
+            d = _lyrics_folder(song_id, row["title"], row["artist"])
         else:
-            name = song_id
-        d = os.path.join(LYRICS_DIR, name)
+            d = os.path.join(LYRICS_DIR, song_id)
         os.makedirs(d, exist_ok=True)
         return d
-
-    def _lyrics_filename(label: str) -> str:
-        """Return sanitized LRC filename from a set label."""
-        safe = re.sub(r'[<>:"/\\|?*]', "_", label).strip().rstrip(".")
-        return f"Lyrics - {safe or 'default'}.lrc"
-
-    def _colors_filename(label: str) -> str:
-        """Return sanitized colors-map filename from a set label."""
-        safe = re.sub(r'[<>:"/\\|?*]', "_", label).strip().rstrip(".")
-        return f"Lyrics - {safe or 'default'}.colors.json"
 
     def _parse_lrc_timestamps(text: str):
         """Extract (time_seconds, raw_text) tuples from LRC text."""
@@ -861,6 +1092,7 @@ def create_app() -> Flask:
     @app.get("/lyrics/<song_id>")
     def list_lyric_sets(song_id: str):
         with db.get_conn() as conn:
+            purge_empty_lyric_sets(conn, song_id)
             rows = conn.execute(
                 "SELECT id, label, position FROM lyric_sets WHERE song_id = ? ORDER BY position",
                 (song_id,),
@@ -918,7 +1150,12 @@ def create_app() -> Flask:
         if not os.path.isfile(path):
             return jsonify({})
         with open(path, "r", encoding="utf-8") as fh:
-            return jsonify(json.load(fh))
+            data = json.load(fh)
+        # Keep the saved key order. jsonify sorts keys, which reshuffles the legend.
+        return app.response_class(
+            json.dumps(data, ensure_ascii=False),
+            mimetype="application/json",
+        )
 
     @app.put("/lyrics/<song_id>/legend")
     def save_legend(song_id: str):
@@ -970,6 +1207,14 @@ def create_app() -> Flask:
                 (set_id, song_id),
             ).fetchone()
         if not row:
+            return jsonify({"error": "lyric set not found"}), 404
+        with db.get_conn() as conn:
+            purge_empty_lyric_sets(conn, song_id)
+            still = conn.execute(
+                "SELECT 1 FROM lyric_sets WHERE id = ? AND song_id = ?",
+                (set_id, song_id),
+            ).fetchone()
+        if not still:
             return jsonify({"error": "lyric set not found"}), 404
         path = os.path.join(_lyrics_dir(song_id), _lyrics_filename(row["label"]))
         if not os.path.isfile(path):
@@ -1030,9 +1275,9 @@ def create_app() -> Flask:
                 try:
                     fp = os.path.join(song_dir, fn)
                     if os.path.isfile(fp):
-                        os.remove(fp)
-                except OSError:
-                    pass
+                        utils.recycle_path(fp)
+                except OSError as e:
+                    app.logger.warning("Could not recycle %s: %s", fp, e)
         with db.get_conn() as conn:
             conn.execute(
                 "DELETE FROM lyric_sets WHERE id = ? AND song_id = ?",
@@ -1061,48 +1306,12 @@ def create_app() -> Flask:
 
     @app.post("/wrapped/<int:year>/playlist")
     def create_wrapped_playlist(year: int):
-        start_date = f"{year - 1}-12-01"
-        end_date = f"{year}-11-30"
-
+        """Desktop force-generate. Mobile clients are not allowed to build a local copy."""
         with db.get_conn() as conn:
-            top_songs = conn.execute(
-                """
-                SELECT s.id, COUNT(*) AS play_count
-                FROM playlogs p JOIN songs s ON s.id = p.song_id
-                WHERE DATE(p.timestamp) >= ? AND DATE(p.timestamp) <= ?
-                GROUP BY s.id
-                ORDER BY play_count DESC
-                """,
-                (start_date, end_date),
-            ).fetchall()
-
-            if not top_songs:
-                return jsonify({"error": "no play data for this year"}), 400
-
-            playlist_name = f"Your {year} Playback"
-            existing = conn.execute(
-                "SELECT id FROM playlists WHERE name = ?", (playlist_name,)
-            ).fetchone()
-
-            if existing:
-                pid = existing["id"]
-                conn.execute(
-                    "DELETE FROM playlist_songs WHERE playlist_id = ?", (pid,)
-                )
-            else:
-                pid = utils.new_id()
-                conn.execute(
-                    "INSERT INTO playlists (id, name) VALUES (?, ?)",
-                    (pid, playlist_name),
-                )
-
-            for pos, row in enumerate(top_songs):
-                conn.execute(
-                    "INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)",
-                    (pid, row["id"], pos),
-                )
-
-        return jsonify({"ok": True, "playlist_id": pid, "name": playlist_name, "song_count": len(top_songs)})
+            created = db.generate_wrapped_playlist(conn, year)
+        if not created:
+            return jsonify({"error": "no play data for this year"}), 400
+        return jsonify(created)
 
     # =====================================================================
     #  Dev / testing tools
@@ -1204,7 +1413,111 @@ def create_app() -> Flask:
                     "INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)",
                     (pid, sid, pos),
                 )
+            db._mark_wrapped(conn, year, "generated")
         return jsonify({"ok": True, "playlist_id": pid, "name": playlist_name, "song_count": len(song_ids)})
+
+    # =====================================================================
+    #  Library export / import
+    # =====================================================================
+
+    def _zip_member_ok(name: str) -> bool:
+        name = name.replace("\\", "/").lstrip("/")
+        if not name or name.endswith("/"):
+            return False
+        parts = [p for p in name.split("/") if p]
+        if any(p == ".." for p in parts):
+            return False
+        if name == "data/music.db":
+            return True
+        return name.startswith("storage/")
+
+    @app.get("/admin/export")
+    def admin_export():
+        if os.path.isfile(db.DB_PATH):
+            try:
+                checkpoint = sqlite3.connect(db.DB_PATH)
+                checkpoint.execute("PRAGMA wal_checkpoint(FULL)")
+                checkpoint.close()
+            except sqlite3.Error:
+                pass
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            if os.path.isfile(db.DB_PATH):
+                zf.write(db.DB_PATH, "data/music.db")
+            storage = os.path.join(BASE_DIR, "storage")
+            if os.path.isdir(storage):
+                for root, _dirs, files in os.walk(storage):
+                    for fn in files:
+                        abs_path = os.path.join(root, fn)
+                        rel = os.path.relpath(abs_path, BASE_DIR).replace("\\", "/")
+                        if _zip_member_ok(rel):
+                            zf.write(abs_path, rel)
+        buf.seek(0)
+        return send_file(
+            buf,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name="spectrum-library.zip",
+        )
+
+    @app.post("/admin/import")
+    def admin_import():
+        upload = request.files.get("file")
+        if not upload or not upload.filename:
+            return jsonify({"error": "missing 'file' zip"}), 400
+        import tempfile
+        staging = tempfile.mkdtemp(prefix="spectrum-import-")
+        try:
+            raw = upload.read()
+            try:
+                zf = zipfile.ZipFile(io.BytesIO(raw))
+            except zipfile.BadZipFile:
+                return jsonify({"error": "file is not a zip archive"}), 400
+            with zf:
+                for info in zf.infolist():
+                    if info.is_dir():
+                        continue
+                    name = info.filename.replace("\\", "/")
+                    if not _zip_member_ok(name):
+                        return jsonify({"error": f"unexpected path in archive: {name}"}), 400
+                    dest = os.path.join(staging, *name.split("/"))
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with zf.open(info) as src, open(dest, "wb") as out:
+                        shutil.copyfileobj(src, out)
+            new_db = os.path.join(staging, "data", "music.db")
+            if not os.path.isfile(new_db):
+                return jsonify({"error": "archive is missing data/music.db"}), 400
+            try:
+                check = sqlite3.connect(new_db)
+                check.execute("SELECT id FROM songs LIMIT 1")
+                check.close()
+            except sqlite3.Error as e:
+                return jsonify({"error": f"music.db is not a library database: {e}"}), 400
+
+            os.makedirs(os.path.dirname(db.DB_PATH), exist_ok=True)
+            if os.path.isfile(db.DB_PATH):
+                shutil.copy2(db.DB_PATH, db.DB_PATH + ".bak")
+            shutil.copy2(new_db, db.DB_PATH)
+            for suffix in ("-wal", "-shm"):
+                sidecar = db.DB_PATH + suffix
+                if os.path.isfile(sidecar):
+                    try:
+                        os.remove(sidecar)
+                    except OSError:
+                        pass
+            new_storage = os.path.join(staging, "storage")
+            storage_dest = os.path.join(BASE_DIR, "storage")
+            if os.path.isdir(new_storage):
+                if os.path.isdir(storage_dest):
+                    shutil.rmtree(storage_dest)
+                shutil.copytree(new_storage, storage_dest)
+            db.init_db()
+            with db.get_conn() as conn:
+                db.refresh_period_snapshots(conn)
+                db.maybe_generate_wrapped(conn)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+        return jsonify({"ok": True})
 
     return app
 

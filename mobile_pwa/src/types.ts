@@ -9,6 +9,7 @@ export interface Song {
   cover_url?: string | null;
   sort_order?: number;
   downloaded?: number;
+  is_blank?: number | boolean;
   date_added?: string;
   play_count?: number;
   total_time?: number;

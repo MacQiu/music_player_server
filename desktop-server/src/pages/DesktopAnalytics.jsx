@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid } from 'recharts';
-import { getWrappedAnalytics } from '../api/client';
+import { getWrappedAnalytics, getPeriodAnalytics } from '../api/client';
 
 export default function DesktopAnalytics({ analytics }) {
   const currentYear = new Date().getFullYear();
@@ -8,6 +8,10 @@ export default function DesktopAnalytics({ analytics }) {
   const [wrappedYear, setWrappedYear] = useState(currentYear);
   const [wrapped, setWrapped] = useState(null);
   const [wrappedLoading, setWrappedLoading] = useState(false);
+  const [period, setPeriod] = useState('all');
+  const [periodKey, setPeriodKey] = useState('');
+  const [periodData, setPeriodData] = useState(null);
+  const [periodKeys, setPeriodKeys] = useState([]);
 
   useEffect(() => {
     setWrappedLoading(true);
@@ -16,6 +20,20 @@ export default function DesktopAnalytics({ analytics }) {
       .catch(() => setWrapped(null))
       .finally(() => setWrappedLoading(false));
   }, [wrappedYear]);
+
+  useEffect(() => {
+    if (period === 'all') return;
+    let cancelled = false;
+    getPeriodAnalytics(period, periodKey || undefined)
+      .then(data => {
+        if (cancelled) return;
+        setPeriodKeys(data.keys || []);
+        setPeriodData(data.snapshot);
+        if (data.key && data.key !== periodKey) setPeriodKey(data.key);
+      })
+      .catch(() => { if (!cancelled) setPeriodData(null); });
+    return () => { cancelled = true; };
+  }, [period, periodKey]);
 
   if (!analytics) return <div className="dpage"><p className="muted">Loading analytics...</p></div>;
 
@@ -31,13 +49,16 @@ export default function DesktopAnalytics({ analytics }) {
     return parts.join(' ');
   };
 
-  const songChartData = (analytics.top_songs || []).map(s => ({
+  const songSource = period === 'all' ? (analytics.top_songs || []) : (periodData?.top_songs || []);
+  const artistSource = period === 'all' ? (analytics.top_artists || []) : (periodData?.top_artists || []);
+
+  const songChartData = songSource.map(s => ({
     name: s.title.length > 18 ? s.title.slice(0, 18) + '...' : s.title,
     plays: s.play_count, time: Math.round((s.total_time || 0) / 60),
   }));
 
-  const artistChartData = (analytics.top_artists || []).map(a => ({
-    name: a.artist.length > 18 ? a.artist.slice(0, 18) + '...' : a.artist,
+  const artistChartData = artistSource.map(a => ({
+    name: (a.artist || '').length > 18 ? a.artist.slice(0, 18) + '...' : (a.artist || ''),
     plays: a.play_count, time: Math.round((a.total_time || 0) / 60),
   }));
 
@@ -54,7 +75,36 @@ export default function DesktopAnalytics({ analytics }) {
     <div className="dpage">
       <h2>Analytics</h2>
 
-      <div className="stats-row" style={{ marginBottom: '1.5rem' }}>
+      <div className="chips-row" style={{ display: 'flex', gap: '.4rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+        {[['all', 'All-time'], ['week', 'Week'], ['month', 'Month'], ['year', 'Year']].map(([id, label]) => (
+          <button key={id} className={`chip ${period === id ? 'active' : ''}`}
+            onClick={() => { setPeriod(id); setPeriodKey(''); setPeriodData(null); }}
+            style={{ padding: '.3rem .7rem', borderRadius: 999, border: '1px solid var(--border)', background: period === id ? 'var(--accent, #1db954)' : 'transparent', color: period === id ? '#000' : 'inherit', cursor: 'pointer' }}>
+            {label}
+          </button>
+        ))}
+        {period !== 'all' && periodKeys.length > 0 && (
+          <select value={periodKey} onChange={e => setPeriodKey(e.target.value)}
+            style={{ background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 'var(--radius-sm)', padding: '.3rem .5rem' }}>
+            {periodKeys.map(k => <option key={k} value={k}>{k}</option>)}
+          </select>
+        )}
+      </div>
+
+      {period !== 'all' && (
+        <div className="stats-row" style={{ marginBottom: '1.5rem' }}>
+          <div className="stat-card">
+            <div className="stat-card__value">{periodData?.total_plays ?? 0}</div>
+            <div className="stat-card__label">Plays ({periodKey || period})</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card__value">{fmtTime(periodData?.total_listening_time)}</div>
+            <div className="stat-card__label">Listening Time</div>
+          </div>
+        </div>
+      )}
+
+      {period === 'all' && <div className="stats-row" style={{ marginBottom: '1.5rem' }}>
         <div className="stat-card">
           <div className="stat-card__value">{analytics.total_plays}</div>
           <div className="stat-card__label">Total Plays</div>
@@ -63,9 +113,9 @@ export default function DesktopAnalytics({ analytics }) {
           <div className="stat-card__value">{fmtTime(analytics.total_listening_time)}</div>
           <div className="stat-card__label">Listening Time</div>
         </div>
-      </div>
+      </div>}
 
-      {historyData.length > 0 && (
+      {period === 'all' && historyData.length > 0 && (
         <section className="dpage__section">
           <h3>Listening Activity (Last 30 Days)</h3>
           <div className="chart-container">

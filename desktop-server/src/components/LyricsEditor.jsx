@@ -44,6 +44,39 @@ function parseTsInput(str) {
   return mins * 60 + secs + ms / 1000;
 }
 
+function LegendNameRow({ color, name, index, count, onRename, onMove, onDelete }) {
+  const [draft, setDraft] = useState(name);
+
+  useEffect(() => { setDraft(name); }, [name]);
+
+  const commit = () => {
+    const trimmed = draft.trim();
+    if (!trimmed) {
+      setDraft(name);
+      return;
+    }
+    if (trimmed !== name) onRename(color, trimmed);
+  };
+
+  return (
+    <div className="lyrics-legend-editor__row">
+      <span className="lyrics-legend__swatch" style={{ background: SINGER_COLORS[color] || color }} />
+      <span className="lyrics-legend-editor__color">{color}</span>
+      <input
+        className="lyrics-legend-editor__name"
+        value={draft}
+        aria-label={`${color} singer name`}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+      />
+      <button className="btn btn--sm btn--ghost" type="button" title="Move up" disabled={index === 0} onClick={() => onMove(index, -1)}>↑</button>
+      <button className="btn btn--sm btn--ghost" type="button" title="Move down" disabled={index === count - 1} onClick={() => onMove(index, 1)}>↓</button>
+      <button className="btn btn--sm btn--ghost" type="button" onClick={() => onDelete(color)}>&times;</button>
+    </div>
+  );
+}
+
 export default function LyricsEditor({ song, audioRef, onClose, onSaved }) {
   const [sets, setSets] = useState([]);
   const [activeSetId, setActiveSetId] = useState(null);
@@ -288,6 +321,23 @@ export default function LyricsEditor({ song, audioRef, onClose, onSaved }) {
     saveLegend(song.id, updated).catch(() => {});
   };
 
+  const handleRenameLegendEntry = (color, name) => {
+    const updated = { ...legend, [color]: name };
+    setLegend(updated);
+    saveLegend(song.id, updated).catch(() => {});
+  };
+
+  const handleMoveLegendEntry = (index, direction) => {
+    const entries = Object.entries(legend);
+    const next = index + direction;
+    if (next < 0 || next >= entries.length) return;
+    const reordered = [...entries];
+    [reordered[index], reordered[next]] = [reordered[next], reordered[index]];
+    const updated = Object.fromEntries(reordered);
+    setLegend(updated);
+    saveLegend(song.id, updated).catch(() => {});
+  };
+
   const firstUnstamped = lines.findIndex(l => l.time === null);
   const hasAnyTs = lines.some(l => l.time !== null);
   const usedLegendColors = new Set(Object.keys(legend));
@@ -343,12 +393,17 @@ export default function LyricsEditor({ song, audioRef, onClose, onSaved }) {
           <button className="modal__close" onClick={() => setShowLegendEditor(false)}>&times;</button>
         </div>
         <div className="lyrics-overlay__body lyrics-editor" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-          {Object.entries(legend).map(([color, name]) => (
-            <div key={color} className="lyrics-legend-editor__row">
-              <span className="lyrics-legend__swatch" style={{ background: SINGER_COLORS[color] || color }} />
-              <span style={{ flex: 1 }}>{color}: {name}</span>
-              <button className="btn btn--sm btn--ghost" onClick={() => handleDeleteLegendEntry(color)}>&times;</button>
-            </div>
+          {Object.entries(legend).map(([color, name], index, entries) => (
+            <LegendNameRow
+              key={color}
+              color={color}
+              name={name}
+              index={index}
+              count={entries.length}
+              onRename={handleRenameLegendEntry}
+              onMove={handleMoveLegendEntry}
+              onDelete={handleDeleteLegendEntry}
+            />
           ))}
           <div className="lyrics-legend-editor__add">
             <select value={legendNewColor} onChange={e => setLegendNewColor(e.target.value)} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: '4px', padding: '.3rem' }}>

@@ -347,26 +347,30 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // --- Queue operations ---
 
   const playNextInner = useCallback(() => {
-    if (manualQueue.length > 0) {
-      const next = manualQueue[0];
-      setManualQueue(prev => prev.slice(1));
+    const queuedIdx = manualQueue.findIndex(s => !s.is_blank);
+    if (queuedIdx >= 0) {
+      const next = manualQueue[queuedIdx];
+      setManualQueue(prev => prev.filter((_, i) => i !== queuedIdx));
       shouldPlayRef.current = true;
       setCurrentSong(next);
       return;
     }
-    const nextIdx = sourceIndex + 1;
-    if (nextIdx < sourceList.length) {
+    const advance = (from: number) => {
+      for (let i = from; i < sourceList.length; i++) {
+        if (!sourceList[i].is_blank) return i;
+      }
+      return -1;
+    };
+    let nextIdx = advance(sourceIndex + 1);
+    if (nextIdx < 0 && repeatMode === 'playlist') nextIdx = advance(0);
+    if (nextIdx >= 0 && sourceList[nextIdx] && !sourceList[nextIdx].is_blank) {
       setSourceIndex(nextIdx);
       shouldPlayRef.current = true;
       setCurrentSong(sourceList[nextIdx]);
-    } else if (repeatMode === 'playlist' && sourceList.length > 0) {
-      setSourceIndex(0);
-      shouldPlayRef.current = true;
-      setCurrentSong(sourceList[0]);
-    } else {
-      shouldPlayRef.current = false;
-      setPlaying(false);
+      return;
     }
+    shouldPlayRef.current = false;
+    setPlaying(false);
   }, [manualQueue, sourceIndex, sourceList, repeatMode]);
 
   useEffect(() => {
@@ -395,6 +399,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [currentSong?.id]);
 
   const playSong = useCallback((song: Song, contextSongs?: Song[]) => {
+    if (song?.is_blank) return;
     const list = contextSongs || sourceList;
     const idx = list.findIndex(s => s.id === song.id);
     flushListened(true);
@@ -446,8 +451,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       seek(0);
       return;
     }
-    if (sourceIndex > 0) {
-      const prevIdx = sourceIndex - 1;
+    let prevIdx = -1;
+    for (let i = sourceIndex - 1; i >= 0; i--) {
+      if (!sourceList[i].is_blank) { prevIdx = i; break; }
+    }
+    if (prevIdx >= 0) {
       flushListened(true);
       setSourceIndex(prevIdx);
       shouldPlayRef.current = true;
@@ -464,6 +472,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [playNextInner, flushListened]);
 
   const addToQueue = useCallback((song: Song) => {
+    if (song?.is_blank) return;
     setManualQueue(prev => [...prev, song]);
   }, []);
 

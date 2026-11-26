@@ -1,6 +1,7 @@
 import { useState, useRef, useMemo, useCallback } from 'react';
-import { deleteSong, addSongToPlaylist, uploadCover, reorderLibrary } from '../api/client';
+import { deleteSong, addSongToPlaylist, uploadCover, attachSongAudio, reorderLibrary } from '../api/client';
 import SongView, { TableHeader } from '../components/SongView';
+import SongContextMenu from '../components/SongContextMenu';
 
 function sortSongs(list, field, dir) {
   const cmp = (a, b) => {
@@ -24,7 +25,9 @@ export default function DesktopLibrary({
   const [search, setSearch] = useState('');
   const [contextMenu, setContextMenu] = useState(null);
   const coverInputRef = useRef(null);
+  const audioInputRef = useRef(null);
   const [coverSongId, setCoverSongId] = useState(null);
+  const [audioSongId, setAudioSongId] = useState(null);
   const [sortField, setSortField] = useState(null);
   const [sortDir, setSortDir] = useState('asc');
   const [dragIdx, setDragIdx] = useState(null);
@@ -116,6 +119,25 @@ export default function DesktopLibrary({
     e.target.value = '';
   };
 
+  const handleAddAudio = (songId) => {
+    setAudioSongId(songId);
+    closeContext();
+    setTimeout(() => audioInputRef.current?.click(), 0);
+  };
+
+  const handleAudioFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !audioSongId) return;
+    try {
+      await attachSongAudio(audioSongId, file);
+      onRefreshSongs();
+    } catch (err) {
+      alert(`Could not add audio: ${err.message}`);
+    }
+    setAudioSongId(null);
+    e.target.value = '';
+  };
+
   const isInManualQueue = (songId) => manualQueue?.some(s => s.id === songId);
   const handleRemoveFromQueue = (songId) => {
     const idx = manualQueue?.findIndex(s => s.id === songId);
@@ -126,6 +148,7 @@ export default function DesktopLibrary({
   return (
     <div className="lib-page" onClick={closeContext}>
       <input type="file" ref={coverInputRef} accept="image/*" style={{ display: 'none' }} onChange={handleCoverFile} />
+      <input type="file" ref={audioInputRef} accept=".mp3,.wav,audio/mpeg,audio/wav" style={{ display: 'none' }} onChange={handleAudioFile} />
 
       <div className="lib-page__header">
         <h1 className="lib-page__title">All Songs</h1>
@@ -159,9 +182,11 @@ export default function DesktopLibrary({
             dragOverPosition={dragOverIdx === i && dragIdx !== null && dragIdx !== i ? (dragIdx < i ? 'below' : 'above') : undefined}
             actions={
               <div className="sv-actions">
+                {!s.is_blank && (
                 <a className="sv-action-btn" href={`/api/download/${s.id}`} download title="Download" onClick={e => e.stopPropagation()}>
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
                 </a>
+                )}
                 <button className="sv-action-btn sv-action-btn--danger" onClick={(e) => { e.stopPropagation(); handleDelete(s.id, s.title); }} title="Delete">
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
                 </button>
@@ -171,26 +196,18 @@ export default function DesktopLibrary({
         ))}
       </div>
 
-      {contextMenu && (
-        <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }} onClick={(e) => e.stopPropagation()}>
-          <button onClick={() => { onPlay(contextMenu.song); closeContext(); }}>Play</button>
-          <button onClick={() => { addToQueue(contextMenu.song); closeContext(); }}>Add to Queue</button>
-          {isInManualQueue(contextMenu.song.id) && (
-            <button onClick={() => handleRemoveFromQueue(contextMenu.song.id)}>Remove from Queue</button>
-          )}
-          <button onClick={() => handleSetCover(contextMenu.song.id)}>Set Cover</button>
-          {playlists.length > 0 && (
-            <>
-              <div className="context-menu__divider" />
-              {playlists.map((p) => (
-                <button key={p.id} onClick={() => handleAddToPlaylist(p.id, contextMenu.song.id)}>
-                  Add to &ldquo;{p.name}&rdquo;
-                </button>
-              ))}
-            </>
-          )}
-        </div>
-      )}
+      <SongContextMenu
+        menu={contextMenu}
+        onClose={closeContext}
+        onPlay={onPlay}
+        onAddToQueue={addToQueue}
+        onRemoveFromQueue={handleRemoveFromQueue}
+        inQueue={contextMenu ? isInManualQueue(contextMenu.song.id) : false}
+        onSetCover={handleSetCover}
+        onAddAudio={handleAddAudio}
+        playlists={playlists}
+        onAddToPlaylist={handleAddToPlaylist}
+      />
     </div>
   );
 }

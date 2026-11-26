@@ -172,6 +172,7 @@ export default function App() {
   // ---- Queue operations ----
 
   const playSong = useCallback((song, contextSongs = null) => {
+    if (song?.is_blank) return;
     const list = contextSongs || songs;
     const idx = list.findIndex(s => s.id === song.id);
     setSourceList(list);
@@ -186,35 +187,43 @@ export default function App() {
   }, [songs]);
 
   const playNext = useCallback(() => {
-    if (manualQueue.length > 0) {
-      const next = manualQueue[0];
-      setManualQueue(prev => prev.slice(1));
+    const queuedIdx = manualQueue.findIndex(s => !s.is_blank);
+    if (queuedIdx >= 0) {
+      const next = manualQueue[queuedIdx];
+      setManualQueue(prev => prev.filter((_, i) => i !== queuedIdx));
       setCurrentSong(next);
       shouldPlayRef.current = true;
       return;
     }
-    const nextIdx = sourceIndex + 1;
-    if (nextIdx < sourceList.length) {
-      setSourceIndex(nextIdx);
-      setCurrentSong(sourceList[nextIdx]);
-      shouldPlayRef.current = true;
-    } else if (repeatMode === 'playlist' && sourceList.length > 0) {
-      setSourceIndex(0);
-      setCurrentSong(sourceList[0]);
-      shouldPlayRef.current = true;
-    } else {
-      setPlaying(false);
+    const advance = (from) => {
+      for (let i = from; i < sourceList.length; i++) {
+        if (!sourceList[i].is_blank) return i;
+      }
+      return -1;
+    };
+    let nextIdx = advance(sourceIndex + 1);
+    if (nextIdx < 0 && repeatMode === 'playlist') nextIdx = advance(0);
+    if (nextIdx >= 0 && !(repeatMode === 'playlist' && nextIdx === sourceIndex && sourceList[nextIdx]?.is_blank)) {
+      if (nextIdx >= 0 && sourceList[nextIdx] && !sourceList[nextIdx].is_blank && (nextIdx !== sourceIndex || repeatMode === 'playlist')) {
+        setSourceIndex(nextIdx);
+        setCurrentSong(sourceList[nextIdx]);
+        shouldPlayRef.current = true;
+        return;
+      }
     }
+    setPlaying(false);
   }, [manualQueue, sourceIndex, sourceList, repeatMode]);
 
   const playPrevious = useCallback(() => {
     const el = audioRef.current;
     if (el && el.currentTime > 3) { el.currentTime = 0; return; }
-    if (sourceIndex > 0) {
-      const prevIdx = sourceIndex - 1;
-      setSourceIndex(prevIdx);
-      setCurrentSong(sourceList[prevIdx]);
-      shouldPlayRef.current = true;
+    for (let i = sourceIndex - 1; i >= 0; i--) {
+      if (!sourceList[i].is_blank) {
+        setSourceIndex(i);
+        setCurrentSong(sourceList[i]);
+        shouldPlayRef.current = true;
+        return;
+      }
     }
   }, [sourceIndex, sourceList]);
 
@@ -225,6 +234,7 @@ export default function App() {
   }, [sendLog, repeatMode, playNext]);
 
   const addToQueue = useCallback((song) => {
+    if (song?.is_blank) return;
     setManualQueue(prev => [...prev, song]);
   }, []);
 

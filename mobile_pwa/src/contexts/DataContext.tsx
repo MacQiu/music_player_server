@@ -214,7 +214,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     let failed = 0;
     const ids = getDownloadedIds();
     for (const song of list) {
-      if (ids.has(song.id)) continue;
+      if (song.is_blank || ids.has(song.id)) continue;
       setDownloadProgress(p => ({ ...p, [song.id]: 0 }));
       try {
         await downloadSong(song.id, song.cover_url, (f) => {

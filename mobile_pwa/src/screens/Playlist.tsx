@@ -20,7 +20,7 @@ import {
 } from '../api/client';
 import { useMultiSelect } from '../hooks/useMultiSelect';
 import { usePress } from '../hooks/usePress';
-import { fmtDuration, fmtListeningTime } from '../utils/format';
+import { fmtDuration } from '../utils/format';
 import { Colors } from '../constants/theme';
 import type { PlaylistDetail, Song } from '../types';
 
@@ -45,12 +45,12 @@ function PlaylistSongRow({ song, imgVersion, selectMode, selected, isWrapped, on
       <CoverImage coverUrl={song.cover_url} songId={song.id} size={44} imgVersion={imgVersion} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="pl-song-title ellipsis">{song.title}</div>
-        <div className="pl-song-artist ellipsis">{song.artist || 'Unknown'}</div>
+        <div className="pl-song-artist ellipsis">{song.is_blank ? 'No audio' : (song.artist || 'Unknown')}</div>
       </div>
       {!selectMode && isWrapped && (
         <div className="song-stats">
           <div>{song.play_count || 0} plays</div>
-          <div>{fmtListeningTime(song.total_time || 0)}</div>
+          {!!song.is_blank && <div>No audio</div>}
         </div>
       )}
       {!selectMode && !isWrapped && (
@@ -80,7 +80,7 @@ function SortableSongRow({ song, imgVersion }: { song: Song; imgVersion: number 
       <CoverImage coverUrl={song.cover_url} songId={song.id} size={44} imgVersion={imgVersion} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="pl-song-title ellipsis">{song.title}</div>
-        <div className="pl-song-artist ellipsis">{song.artist || 'Unknown'}</div>
+        <div className="pl-song-artist ellipsis">{song.is_blank ? 'No audio' : (song.artist || 'Unknown')}</div>
       </div>
     </div>
   );
@@ -237,8 +237,9 @@ export default function PlaylistScreen({ id }: { id: string }) {
   };
 
   const handlePlayAll = () => {
-    if (plSongs.length === 0) return;
-    playSong(plSongs[0], plSongs);
+    const playable = plSongs.filter(s => !s.is_blank);
+    if (playable.length === 0) return;
+    playSong(playable[0], playable);
   };
 
   const totalDuration = plSongs.reduce((acc, s) => acc + (s.duration || 0), 0);

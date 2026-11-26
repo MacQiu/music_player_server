@@ -40,6 +40,21 @@ export async function uploadSong(file, metadata = {}, coverFile = null) {
   return request('POST', '/upload', { body: form, isFormData: true });
 }
 
+export async function attachSongAudio(songId, file) {
+  const form = new FormData();
+  form.append('file', file);
+  return request('POST', `/songs/${songId}/audio`, { body: form, isFormData: true });
+}
+
+export async function createBlankSong(metadata = {}, coverFile = null) {
+  const form = new FormData();
+  if (metadata.title) form.append('title', metadata.title);
+  if (metadata.artist) form.append('artist', metadata.artist);
+  if (metadata.album) form.append('album', metadata.album);
+  if (coverFile) form.append('cover', coverFile);
+  return request('POST', '/songs/blank', { body: form, isFormData: true });
+}
+
 export async function reorderLibrary(songIds) {
   return request('PUT', '/songs/order', { body: { song_ids: songIds } });
 }
@@ -148,6 +163,38 @@ export async function getAnalytics() {
 
 export async function getWrappedAnalytics(year) {
   return request('GET', `/analytics/wrapped?year=${year}`);
+}
+
+export async function getPeriodAnalytics(type, key) {
+  const q = key ? `&key=${encodeURIComponent(key)}` : '';
+  return request('GET', `/analytics/periods?type=${type}${q}`);
+}
+
+export async function getWrappedStatus() {
+  return request('GET', '/wrapped/status');
+}
+
+export async function exportLibrary() {
+  const res = await fetch(`${BASE}/admin/export`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || `Export failed (${res.status})`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'spectrum-library.zip';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function importLibrary(file) {
+  const form = new FormData();
+  form.append('file', file);
+  return request('POST', '/admin/import', { body: form, isFormData: true });
 }
 
 // ---- Lyrics (multi-set) ----

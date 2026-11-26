@@ -1370,6 +1370,8 @@ section { margin-bottom: 1.5rem; }
 .lyrics-legend__swatch { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; display: inline-block; }
 .lyrics-legend__name { color: var(--text); }
 .lyrics-legend-editor__row { display: flex; align-items: center; gap: .5rem; padding: .4rem 0; border-bottom: 1px solid var(--border); font-size: .85rem; color: var(--text); }
+.lyrics-legend-editor__color { width: 4.5rem; flex-shrink: 0; color: var(--text-muted); text-transform: capitalize; }
+.lyrics-legend-editor__name { flex: 1; min-width: 0; padding: .3rem .5rem; background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
 .lyrics-legend-editor__add { display: flex; gap: .4rem; align-items: center; margin-top: .8rem; }
 .lyrics-editor__color-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: .1rem; opacity: .4; flex-shrink: 0; }
 .lyrics-editor__color-btn:hover { opacity: 1; }

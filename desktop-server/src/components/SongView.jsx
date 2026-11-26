@@ -82,7 +82,8 @@ export default function SongView({
         )}
         <div className="sv-row__title-info">
           <span className={`sv-row__title ${isActive ? 'sv-row__title--active' : ''}`}>{song.title}</span>
-          {showArtist && <span className="sv-row__subtitle">{song.artist || 'Unknown'}</span>}
+          {!!song.is_blank && <span className="sv-row__subtitle">No audio</span>}
+          {showArtist && !song.is_blank && <span className="sv-row__subtitle">{song.artist || 'Unknown'}</span>}
         </div>
       </div>
 

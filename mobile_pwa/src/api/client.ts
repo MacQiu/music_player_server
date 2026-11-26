@@ -57,6 +57,15 @@ export async function getSongs() {
   return request('GET', '/songs');
 }
 
+export async function createBlankSong(metadata: Record<string, string> = {}, cover?: File | null) {
+  const form = new FormData();
+  if (metadata.title) form.append('title', metadata.title);
+  if (metadata.artist) form.append('artist', metadata.artist);
+  if (metadata.album) form.append('album', metadata.album);
+  if (cover) form.append('cover', cover, cover.name);
+  return request('POST', '/songs/blank', { body: form, isFormData: true });
+}
+
 export async function uploadSong(file: File, metadata: Record<string, string> = {}, cover?: File | null) {
   const form = new FormData();
   form.append('file', file, file.name);
@@ -210,8 +219,11 @@ export async function toggleDownload(songId: string, downloaded: boolean) {
   return request('PUT', `/songs/${songId}/download`, { body: { downloaded } });
 }
 
-// ---- Wrapped ----
+export async function getPeriodAnalytics(type: string, key?: string) {
+  const q = key ? `&key=${encodeURIComponent(key)}` : '';
+  return request('GET', `/analytics/periods?type=${type}${q}`);
+}
 
-export async function createWrappedPlaylist(year: number) {
-  return request('POST', `/wrapped/${year}/playlist`);
+export async function getWrappedStatus() {
+  return request('GET', '/wrapped/status');
 }
