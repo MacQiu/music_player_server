@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from typing import Optional, Tuple
 
@@ -21,17 +22,21 @@ def allowed_file(filename: str) -> bool:
     return os.path.splitext(filename)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def safe_storage_name(original_filename: str, song_id: str) -> str:
-    """Return ``<song_id>_<secure-basename><ext>`` guaranteed collision-free.
-
-    Prefixing with the UUID prevents clashes when two files share a name.
-    """
-    base = secure_filename(os.path.basename(original_filename)) or "audio"
-    # secure_filename preserves extension if valid; fall back just in case.
-    root, ext = os.path.splitext(base)
-    if ext.lower() not in ALLOWED_EXTENSIONS:
-        ext = os.path.splitext(original_filename)[1].lower()
-    return f"{song_id}_{root}{ext}"
+def safe_storage_name(title: str, artist: str | None, ext: str, dest_dir: str) -> str:
+    """Return ``Title - Artist<ext>``, appending ``(N)`` on collision."""
+    base = title
+    if artist:
+        base = f"{title} - {artist}"
+    safe = re.sub(r'[<>:"/\\|?*]', "_", base).strip().rstrip(".")
+    if not safe:
+        safe = "audio"
+    candidate = f"{safe}{ext}"
+    if not os.path.exists(os.path.join(dest_dir, candidate)):
+        return candidate
+    n = 2
+    while os.path.exists(os.path.join(dest_dir, f"{safe} ({n}){ext}")):
+        n += 1
+    return f"{safe} ({n}){ext}"
 
 
 def extract_metadata(path: str) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[float]]:
@@ -71,3 +76,43 @@ def extract_metadata(path: str) -> Tuple[Optional[str], Optional[str], Optional[
         duration = None
 
     return title, artist, album, duration
+
+
+def recycle_path(path: str) -> None:
+    """Move a file or folder to the Windows Recycle Bin. Does not erase it."""
+    abs_path = os.path.abspath(path)
+    if not os.path.exists(abs_path):
+        return
+    if os.name != "nt":
+        raise OSError("Recycle Bin delete is only available on Windows")
+
+    import ctypes
+    from ctypes import wintypes
+
+    class SHFILEOPSTRUCTW(ctypes.Structure):
+        _fields_ = [
+            ("hwnd", wintypes.HWND),
+            ("wFunc", ctypes.c_uint),
+            ("pFrom", wintypes.LPCWSTR),
+            ("pTo", wintypes.LPCWSTR),
+            ("fFlags", ctypes.c_ushort),
+            ("fAnyOperationsAborted", wintypes.BOOL),
+            ("hNameMappings", ctypes.c_void_p),
+            ("lpszProgressTitle", wintypes.LPCWSTR),
+        ]
+
+    FO_DELETE = 3
+    FOF_SILENT = 0x0004
+    FOF_NOCONFIRMATION = 0x0010
+    FOF_ALLOWUNDO = 0x0040
+    FOF_NOERRORUI = 0x0400
+
+    # SHFileOperation requires a double-null-terminated path list.
+    source = ctypes.create_unicode_buffer(abs_path + "\0")
+    op = SHFILEOPSTRUCTW()
+    op.wFunc = FO_DELETE
+    op.pFrom = ctypes.cast(source, wintypes.LPCWSTR)
+    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI
+    result = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+    if result != 0 or op.fAnyOperationsAborted:
+        raise OSError(f"could not move {abs_path} to the Recycle Bin ({result})")
