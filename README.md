@@ -1,12 +1,13 @@
 # Music Player Server
 
-A local-first Flask backend + React web UI for a personal music player.
+A local-first Flask backend + React desktop UI + Expo mobile app for a
+personal music player. The desktop server (`desktop-server/`) is the central
+hub for uploading songs, managing lyrics, and tracking statistics. The mobile
+app (`mobile_expo/`) connects to the server for syncing and can store songs locally
+for offline playback.
+
 Desktop UI is Spotify-inspired (sidebar, bottom player bar, queue, lyrics).
 Mobile UI is SoundCloud-inspired (overlay player, swipe controls, simplified sync).
-
-Stores a music library on your machine, serves audio over WiFi, tracks
-playback analytics with charts, supports playlists, cover art, and
-offline-first sync from mobile clients.
 
 No external services. SQLite only.
 
@@ -15,41 +16,62 @@ No external services. SQLite only.
 ## Layout
 
 ```
-app.py              # Flask app + all routes
-db.py               # SQLite connection + schema + idempotent upsert
-utils.py            # filename safety, UUIDs, mutagen metadata
+app.py                # Flask app + all routes
+db.py                 # SQLite connection + schema + idempotent upsert
+utils.py              # filename safety, UUIDs, mutagen metadata
 requirements.txt
 data/
-  music.db          # created on first run
+  music.db            # created on first run
 storage/
-  songs/            # uploaded audio files (Title - Artist.ext naming)
-  covers/           # song cover images (content-hash naming for dedup)
-  artists/          # artist profile images
-  lyrics/           # per-song directories with lyric sets and color maps
+  songs/              # uploaded audio files (Title - Artist.ext naming)
+  covers/             # song cover images (content-hash naming for dedup)
+  artists/            # artist profile images
+  lyrics/             # per-song directories with lyric sets and color maps
     Shut Down - BLACKPINK/
       Lyrics - Original.lrc
       Lyrics - Original.colors.json
       Lyrics - Romanized.lrc
       legend.json
-test-ui/            # Vite + React SPA
+desktop-server/       # Vite + React SPA (desktop hub UI)
   src/
-    api/client.js   # API client wrapper
+    api/client.js     # API client wrapper
     constants/
-      colors.js     # Singer color palette (15 colors)
-    components/     # DesktopLayout, Sidebar, DesktopPlayer, Player,
-                    # UploadModal, ServerModal, QueueSidebar, LyricsOverlay,
-                    # LyricsEditor, MobilePlayerOverlay, MobileQueueOverlay,
-                    # PlaylistOverlay, ArtistOverlay
-    pages/          # Home, Library, Analytics, Sync (mobile)
-                    # DesktopHome, DesktopLibrary, DesktopAnalytics,
-                    # DesktopDevTools (desktop)
-    App.jsx         # Root: mode toggle, shared audio, queue state, resume
-    index.css       # All styles
+      colors.js       # Singer color palette (15 colors)
+    components/       # DesktopLayout, Sidebar, DesktopPlayer, Player,
+                      # UploadModal, ServerModal, NowPlayingPanel,
+                      # LyricsOverlay, LyricsEditor, PlaylistView,
+                      # ArtistView, SearchView, SongView, GridCard,
+                      # MobilePlayerOverlay, MobileQueueOverlay
+    pages/            # Home, Library, Analytics, Sync (mobile)
+                      # DesktopHome, DesktopLibrary, DesktopAnalytics,
+                      # DesktopDevTools (desktop)
+    App.jsx           # Root: shared audio, queue state, resume
+    index.css         # All styles
+mobile_expo/          # Expo + React Native app (iOS)
+  app/                # Expo Router file-based routes
+  components/         # MiniPlayer, CoverImage, SongRow, SelectionBar
+  contexts/           # PlayerContext, DataContext
+  hooks/              # useMultiSelect (batch selection logic)
+  utils/              # songStorage, playlogQueue, lyricsCache
+  api/client.ts       # Mobile API client (3s timeout)
+  constants/          # theme, colors
+mobile_pwa/           # Vite + React progressive web app (GitHub Pages)
+  src/                # Port of the mobile_expo UI with IndexedDB storage
+mobile_ios/           # Native Swift/SwiftUI app (iOS)
+  Spectrum/           # Xcode project source
+    Models/           # Codable data models
+    Services/         # APIClient, AudioEngine, StorageManager
+    ViewModels/       # PlayerViewModel, DataViewModel
+    Views/            # All SwiftUI screens
+    Components/       # Shared UI components
+    Theme/            # Colors, spacing, typography
 ```
 
 ---
 
 ## Setup
+
+### Backend
 
 ```bash
 python -m venv venv
@@ -60,18 +82,83 @@ source venv/bin/activate
 
 pip install -r requirements.txt
 python app.py
+```
 
-# React UI
-cd test-ui
+Server listens on `http://0.0.0.0:5000`. From another device on the same WiFi,
+use your machine's LAN IP (e.g. `http://192.168.1.42:5000`). If `certs/cert.pem`
+and `certs/key.pem` exist, it also listens on `https://0.0.0.0:5443` for the
+PWA (see below). Override the paths/port with `SPECTRUM_SSL_CERT`,
+`SPECTRUM_SSL_KEY`, and `SPECTRUM_HTTPS_PORT`.
+
+### Desktop UI
+
+```bash
+cd desktop-server
 npm install
 npm run dev
 ```
 
-Server listens on `http://0.0.0.0:5000`. From another device on the same WiFi,
-use your machine's LAN IP (e.g. `http://192.168.1.42:5000`).
-
 The React dev server runs on `http://localhost:3000` and proxies `/api/*` to
 Flask. To access from a phone on the same network, run `npm run dev -- --host`.
+
+### Mobile App
+
+```bash
+cd mobile_expo
+npm install
+npx expo start
+```
+
+See [`mobile_expo/MOBILE_EXPO.md`](mobile_expo/MOBILE_EXPO.md) for full setup instructions.
+
+### Progressive Web App (GitHub Pages)
+
+`mobile_pwa/` is a web port of the mobile UI that installs to the iPhone Home
+Screen, stores downloaded songs, covers, lyrics, and library data in
+IndexedDB, and keeps working offline after the app is closed. It is deployed
+to GitHub Pages by `.github/workflows/deploy-pwa.yml`.
+
+GitHub Pages is HTTPS-only, and Safari blocks HTTPS pages from calling a
+plain `http://` LAN address. So when a certificate is present, `app.py` also
+serves HTTPS on port **5443**, alongside the usual HTTP on 5000 (the desktop UI
+and Expo app keep using 5000). The phone only needs the server on home Wi-Fi
+while syncing; downloaded songs play with the server off.
+
+One-time setup with [mkcert](https://github.com/FiloSottile/mkcert):
+
+1. On the PC, install mkcert and create a local certificate authority:
+   ```powershell
+   winget install FiloSottile.mkcert
+   mkcert -install
+   ```
+2. Find the PC's Wi-Fi IPv4 address with `ipconfig` (e.g. `192.168.1.42`),
+   then create the server certificate in `certs/` (gitignored):
+   ```powershell
+   mkdir certs
+   mkcert -cert-file certs/cert.pem -key-file certs/key.pem 192.168.1.42 localhost 127.0.0.1
+   ```
+3. Start Flask with `python app.py`. The log should say
+   `HTTPS listening on https://0.0.0.0:5443`. Allow Python through Windows
+   Firewall on private networks if prompted.
+4. Trust the authority on the iPhone. Run `mkcert -CAROOT` to find the folder,
+   copy `rootCA.pem` to the phone as `rootCA.crt` (e.g. via iCloud Drive or
+   email), open it, then install it under **Settings → General → VPN & Device
+   Management**. Finally turn it on under **Settings → General → About →
+   Certificate Trust Settings**. Never share `rootCA-key.pem`.
+5. In the PWA, enter `https://192.168.1.42:5443` as the server address.
+
+Give the PC a fixed IP (a DHCP reservation in the router) so the address
+doesn't change. If it does change, rerun step 2 with the new IP; the phone
+doesn't need the authority reinstalled.
+
+See [`mobile_pwa/MOBILE_PWA.md`](mobile_pwa/MOBILE_PWA.md) for full details.
+
+### Native iOS App
+
+Open `mobile_ios/Spectrum.xcodeproj` in Xcode, select your development team, connect
+your iPhone, and press Cmd+R to build and run. Requires Xcode 15+ and iOS 17+.
+
+See [`mobile_ios/MOBILE_IOS.md`](mobile_ios/MOBILE_IOS.md) for full setup instructions.
 
 ---
 
@@ -82,7 +169,7 @@ Flask. To access from a phone on the same network, run `npm run dev -- --host`.
 - `playlogs(id PK, song_id, duration, timestamp, received_at)`
 - `playlists(id PK, name, created_at)`
 - `playlist_songs(playlist_id, song_id, position)` -- composite PK, FK cascade
-- `artists(name PK, image_path, created_at)`
+- `artists(name PK, image_path, image_position, image_position_mobile, created_at)`
 - `lyric_sets(id PK, song_id, label, position)` -- FK cascade on songs
 
 Idempotency: `playlogs.id` is a UUID the client generates when a play
@@ -118,8 +205,9 @@ All responses are JSON. Errors look like `{"error": "..."}`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/artists` | List all artists with image URLs and song counts |
+| `GET` | `/artists` | List all artists with image URLs, image positions, and song counts |
 | `POST` | `/artists/<name>/image` | Upload artist profile image (`image` file field) |
+| `PUT` | `/artists/<name>/position` | Update artist image position: `{ "image_position": "...", "image_position_mobile": "..." }` (at least one required) |
 | `GET` | `/artist-image/<name>` | Serve artist image |
 
 ### Playlists
@@ -148,6 +236,9 @@ All responses are JSON. Errors look like `{"error": "..."}`.
 |--------|------|-------------|
 | `GET` | `/analytics` | Top songs, top artists, totals, 5 random recommendations from top 15, 30-day play history |
 | `GET` | `/analytics/wrapped?year=YYYY` | Yearly stats (Dec 1 of year-1 to Nov 30 of year): top songs, top artists, total plays and time |
+| `GET` | `/analytics/periods?type=week\|month\|year&key=` | Stored week/month/year snapshots. Week and month are kept for the current calendar year only; yearly snapshots are kept permanently |
+| `POST` | `/songs/blank` | Create a placeholder song (title, artist, album, optional cover) with no audio |
+| `POST` | `/songs/<id>/audio` | Attach an `.mp3` or `.wav` to a placeholder. Keeps the same song, cover, and lyrics, and clears the placeholder flag |
 
 ### Lyrics (Multi-Set)
 
@@ -173,7 +264,10 @@ All responses are JSON. Errors look like `{"error": "..."}`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/wrapped/<year>/playlist` | Auto-generate a "Your YYYY Playback" playlist from most-played songs of that year |
+| `POST` | `/wrapped/<year>/playlist` | Server-side generate a "Your YYYY Playback" playlist from plays through Nov 30. Clients cannot create or edit these playlists |
+| `GET` | `/wrapped/status` | Wrapped deadline, last sync, and whether to remind the user to sync |
+| `GET` | `/admin/export` | Zip of `data/music.db` and `storage/` |
+| `POST` | `/admin/import` | Replace this library with an export zip |
 
 ### Dev Tools
 
@@ -187,25 +281,47 @@ All responses are JSON. Errors look like `{"error": "..."}`.
 
 ## Desktop UI (Spotify-inspired)
 
-- **Sidebar**: Home, Library, Analytics navigation; playlist list split into
-  user playlists and Wrapped playlists; inline create; cloud-upload icon for
-  song upload modal; gear icon for server controls modal. Dev Tools nav link
-  appears when developer mode is active.
-- **Main content**: Home (recently played, artists with image upload, playlists
-  that open as overlays, recommended cards), Library (searchable song table
-  with drag-and-drop manual reordering, column sorting for title/artist/album/
-  duration, right-click context menu for play/queue/set cover/add to playlist),
-  Analytics (stat cards + recharts charts + yearly wrapped section with year
-  selector, read-only), Dev Tools (test data management, wrapped playlist
-  creation, empty playback playlist builder)
+The desktop UI lives in `desktop-server/` and serves as the central hub for
+managing your music library -- uploading songs, editing lyrics, tracking
+statistics, and creating wrapped playlists.
+
+- **Top bar**: Spectrum logo (left), Home button + search input + All
+  Songs button (center), Analytics/Upload/Server buttons (right). Typing in
+  the search input navigates to a unified search view. Active page buttons
+  are highlighted.
+- **Sidebar**: collapsible "Your Library" panel. Expanded: filter chips
+  (Playlists, Artists, Wrapped) to filter the unified list of playlists,
+  artists, and wrapped playlists; inline create playlist; Dev chip appears when
+  developer mode is active. Collapsed: narrow column of thumbnail icons for
+  quick access. Currently-playing artist is highlighted.
+- **Main content**: Home (recently played, artists with image upload, playlists,
+  recommended cards), Library (searchable song table with drag-and-drop manual
+  reordering, column sorting for title/artist/album/duration, right-click
+  context menu for play/queue/set cover/add to playlist), Analytics (stat
+  cards + recharts charts + yearly wrapped section with year selector,
+  read-only), Dev Tools (test data management, wrapped playlist creation,
+  empty playback playlist builder)
+- **Playlist view**: full-page detail view with playlist header (cover, editable
+  name, track count, duration), Play All/Add Songs/Delete buttons, song list
+  with reorder/remove/queue, and searchable add-song panel. Navigated via
+  sidebar or Home page. Back button returns to previous page.
+- **Wrapped playlist view**: read-only; hides Add Songs, Delete, rename,
+  remove, and drag controls. Shows per-song play count and listening time
+  for the wrapped year.
+- **Artist view**: full-page detail with hero banner (artist image as
+  background), Play All button, album groupings, song list, and image upload.
+  Back button returns to previous page.
+- **Search view**: unified search across songs, artists, and playlists with
+  filter pills (All, Songs, Artists, Playlists). Top result card with
+  play button, categorized result sections.
 - **Bottom player bar**: cover thumbnail + song info (left), shuffle/prev/
-  play/pause/next/repeat controls + seek bar (center), lyrics/queue/volume/
-  connection icons (right). Repeat and shuffle icons use matching SVG style
-  with active-state highlighting. Single-song repeat shows a visible "1".
-- **Queue sidebar**: slides in from right; sections: previously in queue (songs
-  above current in source list), now playing, added to queue (manual), playing
-  next (remaining songs in source list). Tap to jump, drag to reorder manual
-  queue, remove from manual queue.
+  play/pause/next/repeat controls + seek bar (center), lyrics/queue/details/
+  volume/connection icons (right). Repeat and shuffle icons use matching SVG
+  style with active-state highlighting. Single-song repeat shows a visible "1".
+- **Now Playing panel**: slides in from right with two tab modes: "Now Playing"
+  (cover card + next up preview) and "Queue" (previously played, now playing,
+  added to queue, playing next). Tap to jump, drag to reorder manual queue,
+  remove from manual queue.
 - **Lyrics overlay**: replaces main content with synced lyrics that auto-scroll
   and highlight as the song plays. Supports multiple lyric sets (e.g. Original,
   Romanized, Translated) with a tab bar to switch between them. Color-coded
@@ -215,50 +331,80 @@ All responses are JSON. Errors look like `{"error": "..."}`.
   picker to select from existing cover images to avoid re-uploading duplicates.
   Covers can be deleted from the library via a delete button on each thumbnail.
 - **Server modal**: server status, sync, fetch, analytics refresh
-- **Playlist overlay**: modal dialog with playlist header (cover, editable name,
-  track count, duration), Play All/Add Songs/Delete buttons, song list with
-  reorder/remove/queue, and searchable add-song panel
-- **Wrapped playlist overlay**: read-only; hides Add Songs, Delete, rename,
-  remove, and drag controls. Shows per-song play count and listening time
-  for the wrapped year.
-- **Artist overlay**: clicking an artist opens a modal with all songs by that
-  artist and an option to upload/change their profile image
-- **Developer mode**: toggled with `Ctrl+Shift+D`. Adds a "Dev Tools" page
-  accessible from the sidebar with: generate/delete test play data, create
-  wrapped playlists from actual data, and create empty playback playlists
-  by manually selecting and ordering songs (for retroactively adding old
-  yearly playlists without play data).
+- **Navigation**: view history with back navigation on detail pages (playlist,
+  artist). Switching between top-level pages (Home, Library, Analytics) resets
+  history. Detail-to-detail navigation replaces in place without stacking.
+- **Developer mode**: toggled with `Ctrl+Shift+D`. Adds a "Dev" chip to the
+  sidebar filters. The Dev Tools page provides: generate/delete test play
+  data, create wrapped playlists from actual data, and create empty playback
+  playlists by manually selecting and ordering songs (for retroactively adding
+  old yearly playlists without play data).
 
 ## Mobile UI (SoundCloud-inspired)
+
+The mobile app lives in `mobile_expo/` and is built with Expo + React Native. It
+connects to the desktop server for syncing and can download songs locally
+for offline playback.
 
 - **Home tab**: recently played, artists (tap no-image artists to upload),
   playlists split into user playlists and Wrapped playlists (tap to open
   playlist overlay), recommendations (random 5 from top 15 most played).
   Non-downloaded songs appear greyed out with "Not Downloaded" label.
-- **Library tab**: search bar, sort pills (Title, Artist, Duration) with
-  ascending/descending toggles, Reorder mode with up/down arrow buttons for
-  manual library reordering, song list with "..." menu for play/queue/set
-  cover/download toggle/add to playlist. Non-downloaded songs are dimmed
-  with a "Not Downloaded" subtitle.
+- **Library tab**: unified view with filter chips (All, Playlists, Artists,
+  Wrapped, Songs) that mix playlists, artists, and songs into a single
+  searchable list. Songs filter shows sort pills (Title, Artist, Duration)
+  with ascending/descending toggles. Song list with "..." menu for play/
+  queue/set cover/download toggle/add to playlist. Non-downloaded songs are
+  dimmed with a "Not Downloaded" subtitle.
+- **Multi-select mode** (mobile): long-press any song in the Library or
+  Playlist view to enter selection mode. A `SelectionBar` appears at the
+  bottom with select all/deselect all and batch actions: Add to Playlist,
+  Download, Delete Local (library) or Remove (playlists). Tap songs to
+  toggle selection.
 - **Analytics tab**: stat cards + recharts charts + yearly wrapped section
 - **Sync tab**: card rows for server status, sync status, fetch songs
-- **Mini player bar**: tappable, shows cover + title + play/pause + progress
-- **Full-screen overlay** (tap mini player): cover art (blurred when paused),
-  prev/play/next controls, seek bar, swipe left/right, shuffle/queue/repeat,
-  lyrics button to open a read-only lyrics overlay.
-  Repeat icon uses SVG with "1" for single-song repeat (SoundCloud style).
+- **Mini player bar**: sits above the tab bar in a custom tab bar layout;
+  tappable, shows cover + title + play/pause + progress strip.
+- **Full-screen player** (tap mini player): cover art with blurred background,
+  close button (down-chevron in black circle, top-right), swipe down to
+  dismiss. Song info, seek bar, prev/play/next controls, and bottom row
+  with shuffle/lyrics/queue/repeat. Repeat icon uses "1" for single-song
+  repeat (SoundCloud style). When playing, the cover image fills the
+  background and pans left-to-right over the song duration; control buttons
+  get translucent dark circles. All buttons maintain fixed dimensions in
+  both play and pause states to prevent layout shift. Dragging the seek bar
+  smoothly drags the panning image in real-time.
 - **Queue overlay**: same section layout as desktop queue
 - **Playlist overlay**: full-screen overlay with same functionality as desktop;
   wrapped playlists are read-only with per-song stats
-- **Lyrics overlay (mobile)**: read-only synced lyrics display with set
-  switching and color rendering; no editing capability on mobile
+- **Lyrics overlay (mobile)**: synced lyrics display with set switching, color
+  rendering, and legend; includes lyrics editor with timestamping on mobile.
+  Lyrics data is memory-cached so reopening the overlay for the same song
+  is instant.
+
+## Font
+
+Both UIs use **Nunito** (Google Fonts) as the global typeface. On desktop, it
+is loaded via a `<link>` tag and set as the primary `--font` CSS variable. On
+mobile, `@expo-google-fonts/nunito` is loaded in the root layout and applied
+globally to all `Text` components via a render override.
 
 ## Shared Audio Architecture
 
+### Desktop
 A single `<audio>` element lives in `App.jsx` and is shared across all UIs.
 The mobile mini player, full-screen overlay, and desktop player bar all
-control the same audio instance via shared state and callbacks. This prevents
-the double-audio bug where multiple audio elements could play simultaneously.
+control the same audio instance via shared state and callbacks.
+
+### Mobile
+A single `expo-audio` `AudioPlayer` instance lives in `PlayerContext.tsx`.
+It is configured for background playback (`shouldPlayInBackground: true`).
+The player resolves local files first (if downloaded) and falls back to
+streaming from the server.
+
+**Background playback** (lock screen / app switch) requires a development
+build -- it does not work in Expo Go. See `mobile_expo/MOBILE_EXPO.md` for setup
+instructions.
 
 ## Queue Model
 
@@ -276,9 +422,9 @@ the double-audio bug where multiple audio elements could play simultaneously.
 
 ## Resume Playback
 
-On song change, `{ songId, position }` is saved to `localStorage`. When the
-app loads, it restores the last-played song at the saved position in a
-**paused** state -- no auto-play.
+On song change, `{ songId, position }` is saved to `localStorage` (desktop)
+or `AsyncStorage` (mobile). When the app loads, it restores the last-played
+song at the saved position in a **paused** state -- no auto-play.
 
 ## Library Reordering
 
@@ -323,28 +469,60 @@ teal, cyan, blue, navy blue, magenta, purple, violet, peach, light grey.
 Default (unassigned) text is white when active and dim grey when upcoming.
 
 **Color map format** (stored in `colors.json`):
-- Whole line: `{ "0": "magenta" }` (line index → color name)
+- Whole line: `{ "0": "magenta" }` (line index -> color name)
 - Partial line: `{ "1": [{"s": 0, "e": 10, "c": "red"}, {"s": 10, "e": 25, "c": "blue"}] }`
 
 **Legend**: a per-song color-to-singer-name mapping (`legend.json`) that can be
 toggled on as a sidebar panel in the lyrics overlay.
 
-**Editor workflow**:
-1. Click the palette icon on any line
-2. Pick a color, then "Color Whole Line" or select a portion and "Apply to Selection"
-3. Set up the legend via the "Legend" button to map colors to singer names
-4. Save -- lyrics and colors are saved to separate files
+## Local Song Storage (Mobile)
 
-## Selective Download (Mobile)
+Songs can be downloaded to the device's document directory using
+`expo-file-system`. Downloaded songs persist across app relaunches and carry
+over to production iOS builds. The player automatically uses the local copy
+when available, falling back to server streaming.
 
-All songs from the server appear in the mobile library regardless of download
-status. Songs can be marked as "downloaded" or "not downloaded" via the context
-menu. Non-downloaded songs are greyed out with a "Not Downloaded" subtitle but
-can still be played (streaming from server), added to playlists, and reordered.
+Files are stored at: `{documentDirectory}songs/{songId}.{ext}`
 
-This is a server-side flag (`downloaded` column in `songs` table) designed as
-scaffolding for a future native iOS app or Jellyfin integration, where the flag
-will determine which songs to cache locally on the device.
+The library UI shows "Downloading..." during active downloads and "Not
+Downloaded" for songs that are only available via streaming.
+
+## Offline-First Data (Mobile)
+
+The mobile app caches all data locally so it works without the server:
+
+- **Library metadata** (songs, playlists, artists, analytics) is cached in
+  `AsyncStorage` and loaded on app launch before any network call.
+- **Cover images** (song covers, artist images, playlist images) are cached
+  to the local filesystem via `expo-file-system`. The `CoverImage` component
+  checks the `online` flag from `DataContext` and skips server URLs entirely
+  when offline, loading directly from local cache with zero network delay.
+- **Lyrics** (sets, text, colors, legend) are cached to the filesystem in
+  `{documentDirectory}lyrics/{songId}/`. A module-level memory cache in
+  `lyrics.tsx` keeps lyrics in RAM so reopening the overlay is instant.
+  When offline, all server API calls are skipped; data loads from filesystem
+  cache directly.
+- **Player cover images** use a module-level `coverCache` Map so the cover
+  persists across overlay open/close without re-fetching. When offline,
+  the player skips the server URI and resolves from local cache immediately.
+- **Auto-sync on reconnect**: when the app detects the server coming back
+  online (via the 15-second ping interval), it automatically refreshes all
+  data and re-downloads covers/lyrics for all downloaded songs.
+- **Pull-to-refresh**: all tabs (Home, Library, Analytics, Sync) support
+  pull-to-refresh to manually trigger a data refresh.
+- **API timeout**: all server requests use a 3-second `AbortController`
+  timeout so the app fails fast when the server is unreachable.
+
+## Offline Play Log Queue (Mobile)
+
+Play logs are stored in a local AsyncStorage-backed queue
+(`mobile_expo/utils/playlogQueue.ts`) instead of being sent directly to the server.
+Each log entry includes a client-generated UUID for idempotency.
+
+When the server becomes reachable (detected via the 15-second ping interval
+in `DataContext`), the queue is automatically flushed in batches of 50 via
+the `POST /sync` endpoint. This ensures analytics and wrapped stats are
+accurately tracked even when playing locally stored songs offline.
 
 ## Yearly Analytics (Wrapped)
 
@@ -391,13 +569,23 @@ orange repeat-one style).
 - Max upload: 100 MB. Only `.mp3` and `.wav` audio. Cover images accept
   `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`.
 - `data/music.db` and `storage/` are gitignored; delete them to reset.
+
+## Move to another laptop
+
+1. On the current laptop, open Server controls and choose **Export Library**. That downloads `spectrum-library.zip` (`data/music.db` plus `storage/`).
+2. On the new laptop, clone this repo and start an empty server with `python app.py`.
+3. Open Server controls and choose **Import Library**. Confirm the overwrite, then pick the zip. The new server replaces its database and audio, covers, and lyrics.
 - Shuffle uses Fisher-Yates to randomize the queue within the source list.
 - Cover images can be set for existing songs via the right-click (desktop)
   or "..." menu (mobile) using the "Set Cover" option.
 - When uploading a new song, existing covers can be selected to avoid
   re-uploading the same image.
 - Artist images can be uploaded by clicking/tapping an artist card that has
-  no image yet, or via the artist overlay.
+  no image yet, or via the artist view.
 - Image containers are sized for high-resolution display across both UIs.
 - Database migrations run automatically on startup (cover dedup, sort_order
-  backfill, artist backfill, lyrics directory restructuring, download column).
+  backfill, artist backfill, artist image position columns, lyrics directory
+  restructuring, download column).
+- Background audio on mobile requires a development build (not Expo Go).
+- The mobile app is fully functional offline for downloaded songs, including
+  playback, cover images, lyrics, and analytics display.
