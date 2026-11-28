@@ -207,7 +207,7 @@ marimo/_lsp/
 __marimo__/
 
 # Music server local state
-data/
-storage/
-certs/
+/data/
+/storage/
+/certs/
 /desktop-server/release/
